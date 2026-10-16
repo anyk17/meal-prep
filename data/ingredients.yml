@@ -64,6 +64,19 @@ egg:
   section: protein
   kind: protein
 
+shrimp:
+  display: "Camarón"
+  unit: g
+  section: protein
+  kind: protein
+  notes: "Crudo y pelado."
+
+ham:
+  display: "Jamón"
+  unit: g
+  section: protein
+  kind: protein
+
 sausage:
   display: "Salchicha"
   unit: g
@@ -166,6 +179,19 @@ cherry_tomato:
 
 onion:
   display: "Cebolla cabezona"
+  unit: g
+  section: vegetable
+  kind: other
+
+avocado:
+  display: "Aguacate"
+  unit: g
+  section: vegetable
+  kind: other
+  notes: "Peso de la pulpa, sin cáscara ni semilla."
+
+cucumber:
+  display: "Pepino"
   unit: g
   section: vegetable
   kind: other
@@ -312,6 +338,12 @@ olive_oil:
   section: fat
   kind: other
 
+neutral_oil:
+  display: "Aceite neutro"
+  unit: ml
+  section: fat
+  kind: other
+
 sesame_oil:
   display: "Aceite de ajonjolí"
   unit: ml
@@ -363,6 +395,13 @@ parmesan:
   unit: g
   section: dairy
   kind: other
+
+grated_cheese:
+  display: "Queso rallado"
+  unit: g
+  section: dairy
+  kind: other
+  notes: "Tipo de queso sin especificar."
 
 fresh_cheese:
   display: "Queso fresco"

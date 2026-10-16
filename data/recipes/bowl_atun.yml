@@ -1,0 +1,54 @@
+# Cantidades por porción, a partir de una receta para dos personas.
+id: bowl_atun
+name: "Bowl de atún"
+meal_types: [lunch, dinner]
+extend_to_dinner: true
+
+tags:
+  primary_protein: fish
+
+# Arroz obligatorio al almuerzo; sin arroz en la cena.
+carbs:
+  strategy: optional
+  allowed: [rice]
+  default: rice
+
+ingredients:
+  - item: fish_tuna_canned
+    role: protein
+    qty: "@portion"
+    notes: "Atún en lata, escurrido; usar la porción estándar del planificador."
+
+  - item: greek_yogurt
+    role: dairy
+    qty_g: 60
+    notes: "Natural, sin azúcar."
+
+  - item: soy_sauce
+    role: condiment
+    qty_ml: 15
+
+  - item: red_onion
+    role: veg
+    qty_g: 10
+    notes: "Picada en cubitos."
+
+  - item: lemon
+    role: condiment
+    qty_units: 1
+    notes: "Limón verde (lime)."
+
+  - item: cucumber
+    role: veg
+    qty_g: 125
+
+  - item: cilantro
+    role: herb
+    qty_g: 4
+    notes: "Fresco y picado."
+
+  - item: olive_oil
+    role: fat
+    qty_ml: 7.5
+
+notes: "Agregar ajonjolí blanco y negro, sal y pimienta al gusto. Estos condimentos no se cuantifican en la lista de compras. Usar las porciones estándar de atún y arroz; servir el arroz solo al almuerzo."
