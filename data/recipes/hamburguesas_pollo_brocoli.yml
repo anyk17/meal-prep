@@ -1,0 +1,36 @@
+# Cantidades por porción, a partir de una receta para dos personas.
+id: hamburguesas_pollo_brocoli
+name: "Hamburguesas de pollo y brócoli"
+meal_types: [dinner]
+
+tags:
+  primary_protein: chicken
+
+carbs:
+  strategy: none
+
+ingredients:
+  - item: chicken
+    role: protein
+    qty: "@portion"
+    notes: "Muslo deshuesado, crudo; usar la porción estándar del planificador."
+
+  - item: broccoli
+    role: veg
+    qty_g: 50
+    notes: "Rallado."
+
+  - item: grated_cheese
+    role: dairy
+    qty_g: 30
+
+  - item: egg
+    role: protein_extra
+    qty_units: 1
+
+  - item: olive_oil
+    role: fat
+    qty_ml: 22.5
+    notes: "Extra virgen."
+
+notes: "Agregar sal y pimienta al gusto; no se cuantifican en la lista de compras. La receta original usa 150 g de pollo por porción; aquí se usa la porción estándar de cena. Sin acompañamiento de carbohidratos para respetar las reglas de cena."

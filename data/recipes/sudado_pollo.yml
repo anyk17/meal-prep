@@ -1,0 +1,53 @@
+# Cantidades por porción, a partir de una receta para dos personas.
+id: sudado_pollo
+name: "Sudado de pollo"
+meal_types: [lunch]
+
+tags:
+  primary_protein: chicken
+
+# El planificador selecciona un acompañamiento por almuerzo.
+carbs:
+  strategy: optional
+  allowed: [potato, yuca, corn, rice]
+  default: potato
+
+ingredients:
+  - item: chicken
+    role: protein
+    qty: "@portion"
+    notes: "Muslos con hueso en la receta original; la porción estándar no ajusta el peso por huesos."
+
+  - item: achiote_oil
+    role: fat
+    qty_ml: 5
+
+  - item: garlic
+    role: veg
+    qty_g: 3
+
+  - item: green_onion
+    role: veg
+    qty_g: 25
+
+  - item: tomato
+    role: veg
+    qty_g: 120
+    notes: "Rallado."
+
+  - item: cumin
+    role: spice
+    qty_g: 0.5
+    notes: "Molido."
+
+  - item: cilantro
+    role: herb
+    qty_g: 5
+    notes: "Fresco."
+
+  - item: avocado
+    role: veg
+    qty_g: 37.5
+    notes: "Pulpa."
+
+notes: "Agregar aproximadamente 175 ml de agua por porción y ajustar según sea necesario; sal al gusto. Agua y sal no se cuantifican en la lista de compras. La receta original para dos porciones usa 4 muslos con hueso (600–700 g crudos); aquí se usa la porción estándar de pollo. Elegir un acompañamiento: papa sabanera, yuca pelada, mazorca (peso de los granos) o arroz blanco, con la porción estándar del planificador. La receta original permite combinar acompañamientos, pero el planificador solo admite uno por comida."

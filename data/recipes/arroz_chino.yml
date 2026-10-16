@@ -1,0 +1,55 @@
+# Cantidades por porción, a partir de una receta para cuatro personas.
+id: arroz_chino
+name: "Arroz chino"
+meal_types: [lunch]
+
+tags:
+  primary_protein: pork
+
+carbs:
+  strategy: fixed
+  default: rice
+
+ingredients:
+  - item: pork
+    role: protein
+    qty: "@portion"
+    notes: "Bondiola cruda; usar la porción estándar del planificador."
+
+  - item: shrimp
+    role: protein_extra
+    qty_g: 100
+    notes: "Crudo y pelado."
+
+  - item: ham
+    role: protein_extra
+    qty_g: 50
+
+  - item: green_onion
+    role: veg
+    qty_g: 11.25
+    notes: "Aproximación: 3 tallos de 15 g para la receta de cuatro porciones."
+
+  - item: ginger
+    role: veg
+    qty_g: 1.25
+    notes: "Fresco."
+
+  - item: garlic
+    role: veg
+    qty_g: 3
+    notes: "Aproximación: 1 diente de 3 g por porción."
+
+  - item: carrot
+    role: veg
+    qty_g: 30
+
+  - item: celery
+    role: veg
+    qty_g: 20
+
+  - item: neutral_oil
+    role: fat
+    qty_ml: 7.5
+
+notes: "Usar arroz cocido y refrigerado, calculado desde la porción estándar de arroz crudo. La receta original para cuatro porciones usa aproximadamente 170 g de arroz crudo (500 g cocido) y 500 g de bondiola; aquí se usan las porciones estándar de arroz y cerdo. Agregar salsa de soya, sal y pimienta al gusto; estos condimentos no se cuantifican en la lista de compras."
