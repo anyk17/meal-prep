@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "plan_not_found",
+    "message": "No plan exists for the requested plan_id.",
+    "details": []
+  }
+}

@@ -1,0 +1,900 @@
+{
+  "plan_id": "plan_2026_10_19",
+  "week_start": "2026-10-19",
+  "week_end": "2026-10-25",
+  "timezone": "America/Bogota",
+  "revision": 1,
+  "generated_at": "2026-04-02T14:11:40.743512+00:00",
+  "seed": 5,
+  "derived": {
+    "protein_counts": {
+      "chicken": 4,
+      "beef": 2,
+      "pork": 1,
+      "fish": 3,
+      "egg": 0
+    },
+    "carb_counts": {
+      "yuca": 1,
+      "lentils": 1,
+      "rice": 2,
+      "platano_verde": 1
+    }
+  },
+  "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
+  "slots": [
+    {
+      "assignment_id": "slot_2026-10-19_lunch",
+      "date": "2026-10-19",
+      "day": "mon",
+      "meal": "lunch",
+      "recipe_id": "pollo_toscano_lunch",
+      "recipe_name": "Pollo toscano",
+      "variant_id": "pollo_toscano_lunch__carb_yuca",
+      "protein": "chicken",
+      "protein_quantity": {
+        "value": 260.0,
+        "unit": "g"
+      },
+      "carb": "yuca",
+      "carb_quantity": {
+        "value": 70.0,
+        "unit": "g"
+      },
+      "ingredients": [
+        {
+          "ingredient_id": "chicken",
+          "display": "Pollo",
+          "quantity": 260.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "cherry_tomato",
+          "display": "Tomate cherry",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "spinach",
+          "display": "Espinaca",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 20.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "olives",
+          "display": "Aceitunas",
+          "quantity": 30.0,
+          "unit": "g",
+          "role": "other"
+        },
+        {
+          "ingredient_id": "basil",
+          "display": "Albahaca",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "herb"
+        },
+        {
+          "ingredient_id": "greek_yogurt",
+          "display": "Yogurt griego",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "dairy"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "yuca",
+          "display": "Yuca",
+          "quantity": 70.0,
+          "unit": "g",
+          "role": "carb"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": "slot_2026-10-19_dinner"
+    },
+    {
+      "assignment_id": "slot_2026-10-19_dinner",
+      "date": "2026-10-19",
+      "day": "mon",
+      "meal": "dinner",
+      "recipe_id": "pollo_toscano_lunch",
+      "recipe_name": "Pollo toscano",
+      "variant_id": "pollo_toscano_lunch__carb_none",
+      "protein": "chicken",
+      "protein_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "carb": null,
+      "carb_quantity": null,
+      "ingredients": [
+        {
+          "ingredient_id": "chicken",
+          "display": "Pollo",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "cherry_tomato",
+          "display": "Tomate cherry",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "spinach",
+          "display": "Espinaca",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 20.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "olives",
+          "display": "Aceitunas",
+          "quantity": 30.0,
+          "unit": "g",
+          "role": "other"
+        },
+        {
+          "ingredient_id": "basil",
+          "display": "Albahaca",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "herb"
+        },
+        {
+          "ingredient_id": "greek_yogurt",
+          "display": "Yogurt griego",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "dairy"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        }
+      ],
+      "extended_from_lunch": true,
+      "linked_assignment_id": "slot_2026-10-19_lunch"
+    },
+    {
+      "assignment_id": "slot_2026-10-20_lunch",
+      "date": "2026-10-20",
+      "day": "tue",
+      "meal": "lunch",
+      "recipe_id": "lentejas",
+      "recipe_name": "Lentejas",
+      "variant_id": "lentejas__carb_lentils",
+      "protein": "pork",
+      "protein_quantity": {
+        "value": 280.0,
+        "unit": "g"
+      },
+      "carb": "lentils",
+      "carb_quantity": {
+        "value": 55.0,
+        "unit": "g"
+      },
+      "ingredients": [
+        {
+          "ingredient_id": "sausage",
+          "display": "Salchicha",
+          "quantity": 280.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 20.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "carrot",
+          "display": "Zanahoria",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "tomato",
+          "display": "Tomate",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "lentils",
+          "display": "Lentejas",
+          "quantity": 55.0,
+          "unit": "g",
+          "role": "carb"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    },
+    {
+      "assignment_id": "slot_2026-10-20_dinner",
+      "date": "2026-10-20",
+      "day": "tue",
+      "meal": "dinner",
+      "recipe_id": "salmon_horneado",
+      "recipe_name": "Salmón horneado",
+      "variant_id": "salmon_horneado__carb_none",
+      "protein": "fish",
+      "protein_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "carb": null,
+      "carb_quantity": null,
+      "ingredients": [
+        {
+          "ingredient_id": "fish_salmon",
+          "display": "Salmón",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "asparagus",
+          "display": "Espárragos",
+          "quantity": 150.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "lemon",
+          "display": "Limón",
+          "quantity": 0.5,
+          "unit": "units",
+          "role": "condiment"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 15.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "rosemary",
+          "display": "Romero",
+          "quantity": 3.0,
+          "unit": "g",
+          "role": "herb"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    },
+    {
+      "assignment_id": "slot_2026-10-21_lunch",
+      "date": "2026-10-21",
+      "day": "wed",
+      "meal": "lunch",
+      "recipe_id": "atun_juanfe",
+      "recipe_name": "Atún a la JuanFe",
+      "variant_id": "atun_juanfe__carb_rice",
+      "protein": "fish",
+      "protein_quantity": {
+        "value": 280.0,
+        "unit": "g"
+      },
+      "carb": "rice",
+      "carb_quantity": {
+        "value": 40.0,
+        "unit": "g"
+      },
+      "ingredients": [
+        {
+          "ingredient_id": "fish_tuna_fillet",
+          "display": "Atún en filete",
+          "quantity": 280.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "asparagus",
+          "display": "Espárragos",
+          "quantity": 120.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 20.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "ginger",
+          "display": "Jengibre",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "soy_sauce",
+          "display": "Salsa de soya",
+          "quantity": 20.0,
+          "unit": "ml",
+          "role": "condiment"
+        },
+        {
+          "ingredient_id": "sesame_oil",
+          "display": "Aceite de ajonjolí",
+          "quantity": 5.0,
+          "unit": "ml",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "sesame_seeds",
+          "display": "Ajonjolí",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "garnish"
+        },
+        {
+          "ingredient_id": "rice",
+          "display": "Arroz",
+          "quantity": 40.0,
+          "unit": "g",
+          "role": "carb"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    },
+    {
+      "assignment_id": "slot_2026-10-21_dinner",
+      "date": "2026-10-21",
+      "day": "wed",
+      "meal": "dinner",
+      "recipe_id": "pollo_guiso_habichuelas_dinner",
+      "recipe_name": "Pollo con guiso y habichuelas",
+      "variant_id": "pollo_guiso_habichuelas_dinner__carb_none",
+      "protein": "chicken",
+      "protein_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "carb": null,
+      "carb_quantity": null,
+      "ingredients": [
+        {
+          "ingredient_id": "chicken",
+          "display": "Pollo",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "tomato",
+          "display": "Tomate",
+          "quantity": 150.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_beans",
+          "display": "Habichuela",
+          "quantity": 120.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    },
+    {
+      "assignment_id": "slot_2026-10-22_lunch",
+      "date": "2026-10-22",
+      "day": "thu",
+      "meal": "lunch",
+      "recipe_id": "brocoli_con_carne",
+      "recipe_name": "Brócoli con carne de res",
+      "variant_id": "brocoli_con_carne__carb_platano_verde",
+      "protein": "beef",
+      "protein_quantity": {
+        "value": 280.0,
+        "unit": "g"
+      },
+      "carb": "platano_verde",
+      "carb_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "ingredients": [
+        {
+          "ingredient_id": "beef",
+          "display": "Carne de res",
+          "quantity": 280.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "broccoli",
+          "display": "Brócoli",
+          "quantity": 200.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "carrot",
+          "display": "Zanahoria",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "bell_pepper",
+          "display": "Pimentón",
+          "quantity": 60.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "bell_pepper",
+          "display": "Pimentón",
+          "quantity": 60.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 30.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "ginger",
+          "display": "Jengibre",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "sesame_seeds",
+          "display": "Ajonjolí",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "soy_sauce",
+          "display": "Salsa de soya",
+          "quantity": 15.0,
+          "unit": "ml",
+          "role": "other"
+        },
+        {
+          "ingredient_id": "platano_verde",
+          "display": "Plátano verde",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "carb"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": "slot_2026-10-22_dinner"
+    },
+    {
+      "assignment_id": "slot_2026-10-22_dinner",
+      "date": "2026-10-22",
+      "day": "thu",
+      "meal": "dinner",
+      "recipe_id": "brocoli_con_carne",
+      "recipe_name": "Brócoli con carne de res",
+      "variant_id": "brocoli_con_carne__carb_none",
+      "protein": "beef",
+      "protein_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "carb": null,
+      "carb_quantity": null,
+      "ingredients": [
+        {
+          "ingredient_id": "beef",
+          "display": "Carne de res",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "broccoli",
+          "display": "Brócoli",
+          "quantity": 200.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "carrot",
+          "display": "Zanahoria",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "bell_pepper",
+          "display": "Pimentón",
+          "quantity": 60.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "bell_pepper",
+          "display": "Pimentón",
+          "quantity": 60.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 30.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "ginger",
+          "display": "Jengibre",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "sesame_seeds",
+          "display": "Ajonjolí",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "soy_sauce",
+          "display": "Salsa de soya",
+          "quantity": 15.0,
+          "unit": "ml",
+          "role": "other"
+        }
+      ],
+      "extended_from_lunch": true,
+      "linked_assignment_id": "slot_2026-10-22_lunch"
+    },
+    {
+      "assignment_id": "slot_2026-10-23_lunch",
+      "date": "2026-10-23",
+      "day": "fri",
+      "meal": "lunch",
+      "recipe_id": "arroz_con_pollo",
+      "recipe_name": "Arroz con pollo",
+      "variant_id": "arroz_con_pollo__carb_rice",
+      "protein": "chicken",
+      "protein_quantity": {
+        "value": 260.0,
+        "unit": "g"
+      },
+      "carb": "rice",
+      "carb_quantity": {
+        "value": 40.0,
+        "unit": "g"
+      },
+      "ingredients": [
+        {
+          "ingredient_id": "chicken",
+          "display": "Pollo",
+          "quantity": 260.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "carrot",
+          "display": "Zanahoria",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "bell_pepper",
+          "display": "Pimentón",
+          "quantity": 60.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "peas",
+          "display": "Arverja",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_beans",
+          "display": "Habichuela",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "cilantro",
+          "display": "Cilantro",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "herb"
+        },
+        {
+          "ingredient_id": "bay_leaf",
+          "display": "Laurel",
+          "quantity": 2.0,
+          "unit": "units",
+          "role": "spice"
+        },
+        {
+          "ingredient_id": "garlic",
+          "display": "Ajo",
+          "quantity": 10.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "green_onion",
+          "display": "Cebolla larga",
+          "quantity": 20.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "sausage",
+          "display": "Salchicha",
+          "quantity": 50.0,
+          "unit": "g",
+          "role": "protein_extra"
+        },
+        {
+          "ingredient_id": "tomato_sauce",
+          "display": "Salsa de tomate",
+          "quantity": 50.0,
+          "unit": "ml",
+          "role": "condiment"
+        },
+        {
+          "ingredient_id": "achiote",
+          "display": "Achiote",
+          "quantity": 5.0,
+          "unit": "g",
+          "role": "condiment"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        },
+        {
+          "ingredient_id": "rice",
+          "display": "Arroz",
+          "quantity": 40.0,
+          "unit": "g",
+          "role": "carb"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    },
+    {
+      "assignment_id": "slot_2026-10-23_dinner",
+      "date": "2026-10-23",
+      "day": "fri",
+      "meal": "dinner",
+      "recipe_id": "atun_guisito_dinner",
+      "recipe_name": "Atún con guisito",
+      "variant_id": "atun_guisito_dinner__carb_none",
+      "protein": "fish",
+      "protein_quantity": {
+        "value": 100.0,
+        "unit": "g"
+      },
+      "carb": null,
+      "carb_quantity": null,
+      "ingredients": [
+        {
+          "ingredient_id": "fish_tuna_canned",
+          "display": "Atún en lata",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "protein"
+        },
+        {
+          "ingredient_id": "onion",
+          "display": "Cebolla cabezona",
+          "quantity": 80.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "tomato",
+          "display": "Tomate",
+          "quantity": 120.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "asparagus",
+          "display": "Espárragos",
+          "quantity": 100.0,
+          "unit": "g",
+          "role": "veg"
+        },
+        {
+          "ingredient_id": "olive_oil",
+          "display": "Aceite de oliva",
+          "quantity": 10.0,
+          "unit": "ml",
+          "role": "fat"
+        }
+      ],
+      "extended_from_lunch": false,
+      "linked_assignment_id": null
+    }
+  ]
+}

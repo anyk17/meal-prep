@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The revision parameter is invalid.",
+    "details": [
+      {
+        "field": "revision",
+        "message": "Must be an integer greater than or equal to 1."
+      }
+    ]
+  }
+}

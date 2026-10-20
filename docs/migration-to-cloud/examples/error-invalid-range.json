@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The date range is invalid.",
+    "details": [
+      {
+        "field": "to",
+        "message": "Must be on or after from."
+      }
+    ]
+  }
+}

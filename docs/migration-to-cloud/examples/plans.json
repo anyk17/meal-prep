@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "plan_id": "plan_2026_10_19",
+      "week_start": "2026-10-19",
+      "week_end": "2026-10-25",
+      "timezone": "America/Bogota",
+      "revision": 1,
+      "generated_at": "2026-04-02T14:11:40.743512+00:00",
+      "seed": 5,
+      "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80"
+    }
+  ]
+}

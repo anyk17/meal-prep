@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The date parameter is invalid.",
+    "details": [
+      {
+        "field": "from",
+        "message": "Must be an ISO 8601 calendar date in YYYY-MM-DD format."
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "snapshot_changed",
+    "message": "The requested shopping snapshot is no longer current. Refetch the plan and its shopping list.",
+    "details": []
+  }
+}

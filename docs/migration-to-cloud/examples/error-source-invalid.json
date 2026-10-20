@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "source_invalid",
+    "message": "The configured plan and shopping data could not be validated.",
+    "details": []
+  }
+}

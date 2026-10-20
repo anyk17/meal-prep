@@ -1,0 +1,536 @@
+openapi: 3.1.0
+info:
+  title: Meal Prep Read API
+  version: 0.1.0
+  description: |-
+    Read-only, versioned API for dated weekly meal plans and their current shopping
+    snapshots. This initial development API is intended to bind to loopback. It has
+    no authentication scheme and is not ready for remote deployment. Household-only
+    access protection is required before any remote exposure.
+servers:
+  - url: http://127.0.0.1:5000
+    description: Local development server bound to loopback
+security: []
+tags:
+  - name: Plans
+    description: Current dated weekly plans and their grocery snapshots.
+paths:
+  /api/v1/plans:
+    get:
+      tags: [Plans]
+      operationId: listPlans
+      summary: Find plans overlapping a date range
+      description: |-
+        Returns plans whose Monday-through-Sunday calendar week inclusively overlaps
+        the requested inclusive date range. The range must satisfy from <= to and
+        contain at most 366 calendar days, counting both endpoints. Results are
+        ordered by week_start ascending. An empty result is returned as items: [].
+        Dates are calendar dates in the household timezone; current examples use
+        America/Bogota. Reads never generate or modify a plan.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Inclusive start date in ISO 8601 YYYY-MM-DD format.
+          schema:
+            type: string
+            format: date
+          example: '2026-10-01'
+        - name: to
+          in: query
+          required: true
+          description: Inclusive end date in ISO 8601 YYYY-MM-DD format.
+          schema:
+            type: string
+            format: date
+          example: '2026-10-31'
+      responses:
+        '200':
+          description: Matching current plan summaries, possibly an empty list.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanList'
+              examples:
+                matchingPlan:
+                  summary: One current plan
+                  externalValue: examples/plans.json
+                noMatchingPlans:
+                  summary: No plans overlap this range
+                  externalValue: examples/plans-empty.json
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+  /api/v1/plans/{plan_id}:
+    get:
+      tags: [Plans]
+      operationId: getPlan
+      summary: Read a current weekly plan
+      description: |-
+        Returns the current snapshot for this plan. plan_id is opaque to clients.
+        Slots are ordered by date, then lunch before dinner. The week starts Monday
+        and week_end is the inclusive Sunday. Dates must fall within that week and
+        agree with their day value. Assignment IDs are stable for a slot within a
+        plan and unique within its snapshot. Where a lunch and dinner assignment
+        are linked, linked_assignment_id is reciprocal and both use the same base
+        recipe. extended_from_lunch identifies the dinner that extends its lunch.
+        The initial source covers weekday cooking only, but the schema imposes no
+        permanent maximum slot count. Protein quantities are raw protein ingredient
+        amounts in their stated units, not nutritional protein weight. The seed is
+        provenance and is not a plan identity or a promise of reproducibility.
+        snapshot_id is an opaque content token, separate from the persistent integer
+        revision. It remains stable for an unchanged normalized plan and shopping
+        payload, and changes when either payload or its week anchor changes.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      responses:
+        '200':
+          description: Current plan snapshot.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+              examples:
+                currentWeek:
+                  summary: Current plan for week beginning October 19, 2026
+                  externalValue: examples/plan.json
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+  /api/v1/plans/{plan_id}/shopping-list:
+    get:
+      tags: [Plans]
+      operationId: getShoppingList
+      summary: Read the shopping list for the current plan snapshot
+      description: |-
+        Returns shopping totals derived from the plan's current assignments. Both
+        revision and snapshot_id are required so a client can detect a changed
+        fixture or plan between reads. Only the current snapshot is readable; this
+        API does not expose historical revisions. If either supplied value differs
+        from the current snapshot, the server returns 409 snapshot_changed and the
+        client should refetch the plan, then its shopping list. Reads never generate
+        or modify a plan. Purchased/checkmark state is not part of this response.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - name: revision
+          in: query
+          required: true
+          description: Expected current persistent plan revision, starting at 1.
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: snapshot_id
+          in: query
+          required: true
+          description: Expected current opaque snapshot token.
+          schema:
+            type: string
+            minLength: 1
+          example: sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80
+      responses:
+        '200':
+          description: Shopping totals matching the current plan snapshot.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingList'
+              examples:
+                currentWeek:
+                  summary: Shopping list matching revision 1
+                  externalValue: examples/shopping-list.json
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+        '409':
+          description: Expected revision or snapshot token is stale.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                changedSnapshot:
+                  summary: Refetch the plan and its shopping list
+                  externalValue: examples/error-snapshot-changed.json
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+components:
+  parameters:
+    PlanId:
+      name: plan_id
+      in: path
+      required: true
+      description: Opaque plan identifier; 1–128 ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit. Invalid identifiers return 400.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+      example: plan_2026_10_19
+  responses:
+    InvalidRequest:
+      description: Missing or malformed input, or an invalid date range.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidRange:
+              summary: Range end precedes range start
+              externalValue: examples/error-invalid-range.json
+            invalidDate:
+              summary: Date is not a calendar date in YYYY-MM-DD format
+              externalValue: examples/error-invalid-date.json
+            invalidRevision:
+              summary: Revision must be a positive integer
+              externalValue: examples/error-invalid-revision.json
+    PlanNotFound:
+      description: No plan exists for the requested identifier.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownPlan:
+              summary: Unknown plan identifier
+              externalValue: examples/error-plan-not-found.json
+    SourceFailure:
+      description: The source is unavailable or contains invalid plan data.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unavailable:
+              summary: Temporary source failure
+              externalValue: examples/error-source-unavailable.json
+            invalidSource:
+              summary: Source data failed validation
+              externalValue: examples/error-source-invalid.json
+  schemas:
+    PlanList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanSummary'
+    PlanSummary:
+      type: object
+      additionalProperties: false
+      required: [plan_id, week_start, week_end, timezone, revision, snapshot_id, generated_at, seed]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          description: Opaque stable identity for the saved calendar week.
+        week_start:
+          type: string
+          format: date
+          description: Monday date for this plan's calendar week.
+        week_end:
+          type: string
+          format: date
+          description: Inclusive Sunday date for this plan's calendar week.
+        timezone:
+          type: string
+          description: IANA timezone used to interpret meal dates.
+          example: America/Bogota
+        revision:
+          type: integer
+          minimum: 1
+          description: Current persistent plan revision; the initial fixture uses revision 1.
+        snapshot_id:
+          type: string
+          minLength: 1
+          description: |-
+            Opaque content token for the normalized plan and shopping payload, including
+            the week anchor. The example token is SHA-256 over canonical UTF-8 JSON for
+            {"plan": <plan object without snapshot_id>, "shopping_list": <shopping object
+            without snapshot_id>}, with object keys sorted recursively, no insignificant
+            whitespace, and ensure_ascii=false. Implementations may use another opaque
+            token algorithm, but unchanged normalized content must retain its token.
+        generated_at:
+          type: string
+          format: date-time
+          description: Source generation timestamp. It does not determine week_start.
+        seed:
+          type: integer
+          description: Solver seed recorded as provenance.
+    Plan:
+      type: object
+      additionalProperties: false
+      required: [plan_id, week_start, week_end, timezone, revision, snapshot_id, generated_at, seed, slots, derived]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          description: Opaque stable identity for the saved calendar week.
+        week_start:
+          type: string
+          format: date
+          description: Monday date for this plan's calendar week.
+        week_end:
+          type: string
+          format: date
+          description: Inclusive Sunday date for this plan's calendar week.
+        timezone:
+          type: string
+          description: IANA timezone used to interpret meal dates.
+          example: America/Bogota
+        revision:
+          type: integer
+          minimum: 1
+          description: Current persistent plan revision; the initial fixture uses revision 1.
+        snapshot_id:
+          type: string
+          minLength: 1
+          description: Opaque content token shared with the matching shopping list.
+        generated_at:
+          type: string
+          format: date-time
+          description: Source generation timestamp. It does not determine week_start.
+        seed:
+          type: integer
+          description: Solver seed recorded as provenance.
+        slots:
+          type: array
+          description: Ordered by date, then lunch before dinner; no fixed maximum is imposed.
+          items:
+            $ref: '#/components/schemas/MealAssignment'
+        derived:
+          $ref: '#/components/schemas/PlanDerived'
+    PlanDerived:
+      type: object
+      additionalProperties: false
+      required: [protein_counts, carb_counts]
+      properties:
+        protein_counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          required: [chicken, beef, pork, fish, egg]
+          properties:
+            chicken: {type: integer, minimum: 0}
+            beef: {type: integer, minimum: 0}
+            pork: {type: integer, minimum: 0}
+            fish: {type: integer, minimum: 0}
+            egg: {type: integer, minimum: 0}
+        carb_counts:
+          type: object
+          description: Counts for carb ingredient IDs present in this plan.
+          additionalProperties:
+            type: integer
+            minimum: 0
+    MealAssignment:
+      type: object
+      additionalProperties: false
+      required: [assignment_id, date, day, meal, recipe_id, recipe_name, variant_id, protein, protein_quantity, carb, carb_quantity, ingredients, extended_from_lunch, linked_assignment_id]
+      properties:
+        assignment_id:
+          type: string
+          minLength: 1
+          description: Stable identity for this date and meal within its plan.
+        date:
+          type: string
+          format: date
+          description: Actual meal date within the plan's Monday-Sunday week.
+        day:
+          type: string
+          enum: [mon, tue, wed, thu, fri, sat, sun]
+          description: Weekday corresponding to date.
+        meal:
+          type: string
+          enum: [lunch, dinner]
+        recipe_id:
+          type: string
+          minLength: 1
+        recipe_name:
+          type: string
+        variant_id:
+          type: string
+          minLength: 1
+        protein:
+          type: string
+          enum: [chicken, beef, pork, fish, egg]
+        protein_quantity:
+          $ref: '#/components/schemas/Quantity'
+          description: Raw quantity of the protein ingredient, not nutritional protein weight.
+        carb:
+          type: [string, 'null']
+          description: Carb ingredient ID, or null when the assignment has no carb.
+        carb_quantity:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: 'null'
+          description: Null when carb is null; otherwise its raw ingredient amount.
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanIngredient'
+        extended_from_lunch:
+          type: boolean
+          description: True for a dinner that reuses the same base recipe as lunch.
+        linked_assignment_id:
+          type: [string, 'null']
+          description: Reciprocal assignment ID for a linked same-day lunch/dinner pair, otherwise null.
+    Quantity:
+      type: object
+      additionalProperties: false
+      required: [value, unit]
+      properties:
+        value:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+          enum: [g, ml, units]
+    PlanIngredient:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, display, quantity, unit, role]
+      properties:
+        ingredient_id:
+          type: string
+          minLength: 1
+        display:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+          enum: [g, ml, units]
+        role:
+          type: string
+          enum: [protein, protein_extra, veg, fat, condiment, garnish, herb, spice, dairy, other, carb]
+          description: Recipe ingredient role; carb is added for the selected variant's carbohydrate ingredient.
+    ShoppingList:
+      type: object
+      additionalProperties: false
+      required: [plan_id, revision, snapshot_id, week_start, week_end, sections]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        revision:
+          type: integer
+          minimum: 1
+        snapshot_id:
+          type: string
+          minLength: 1
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        sections:
+          type: object
+          description: Map from shopping section name to its ingredient lines.
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/ShoppingLine'
+    ShoppingLine:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, display, quantity, unit, section, notes]
+      properties:
+        ingredient_id:
+          type: string
+          minLength: 1
+        display:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+          enum: [g, ml, units]
+        section:
+          type: string
+        notes:
+          type: [string, 'null']
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              enum: [invalid_request, plan_not_found, snapshot_changed, source_unavailable, source_invalid]
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
