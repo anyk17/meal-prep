@@ -4,7 +4,7 @@ Template for the public `jflopezo91/meal-plan` repository. Copy `.github/workflo
 
 Layout of the repository:
 
-- `publication/`: `index.json` and `publications/<id>/...`, written by the meal-prep home app (Publish button) or `scripts/export_pages_publication.sh`.
+- `publication/`: `index.json` and `publications/<id>/...`, written by the meal-prep home app (Publish button).
 - `app-ref`: one line, the 40-character commit SHA of the public `jflopezo91/meal-prep` repository whose frontend builds the site.
 - `.github/workflows/pages.yml`: on every push to `main` (or manually), validates `app-ref` and the active publication, builds the frontend with `VITE_BASE_PATH=/meal-plan/`, and deploys to GitHub Pages.
 

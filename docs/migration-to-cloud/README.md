@@ -350,6 +350,8 @@ Check both modes for weekly cards, recipe details, statistics, theme, grocery ch
 
 ### Run the container
 
+This is the day-to-day way to run the home app (and the only one configured to publish): open http://127.0.0.1:8080/. Its data lives in `var/docker-data/` (git-ignored). The Vite + Flask flow above is for developing the code.
+
 One image serves the API-mode frontend (at `/meal-prep/`, `/` redirects there) and the API from one origin, behind gunicorn. Static serving is enabled only when `MEALPLANNER_STATIC_DIR` is set (the image sets it); the Vite dev flow above is unchanged. `GET /healthz` is the liveness check (no database access). The image has no login yet, so Compose sets `MEALPLANNER_TRUST_NETWORK_PEERS=1`: every TCP peer counts as local (otherwise the loopback rule rejects Docker's bridge address) and the loopback-only port mapping is the access control. Phase 6c removes this switch.
 
 WSL (needs Docker; the user must be in the `docker` group):
@@ -398,14 +400,14 @@ One-time setup:
 Publishing: open the publish view, select months, check the preview (every week with its revision and the revision last confirmed live, every trip, the warning that everything is public), and press Publish. The request runs the export, validates the bundle, commits `publication/` and `app-ref` and pushes, then answers `pushed` (or `unchanged` when nothing differs). The page then follows the job until GitHub reports the Pages deployment finished (`live`) or failed. Over HTTP:
 
 ```sh
-curl -s 'http://127.0.0.1:5000/api/v1/publishing/preview?months=2026-10,2026-11'
-curl -s -X POST -H 'Content-Type: application/json' -d '{"months":["2026-10","2026-11"]}' http://127.0.0.1:5000/api/v1/publishing/jobs
-curl -s http://127.0.0.1:5000/api/v1/publishing/jobs/<job_id>
+curl -s 'http://127.0.0.1:8080/api/v1/publishing/preview?months=2026-10,2026-11'
+curl -s -X POST -H 'Content-Type: application/json' -d '{"months":["2026-10","2026-11"]}' http://127.0.0.1:8080/api/v1/publishing/jobs
+curl -s http://127.0.0.1:8080/api/v1/publishing/jobs/<job_id>
 ```
 
-A failed publish (export, validation, push rejected, GitHub unreachable) records a failed job with a short message and leaves the previously pushed version in place; just publish again. To try it without GitHub, point `MEALPLANNER_PUBLISH_REPO` at a local bare repository (`git init --bare --initial-branch=main x.git`, seeded with one commit on `main`). The old manual route (`scripts/export_pages_publication.sh`, commit, push) still works for the legacy Pages workflow, but the two should not be mixed on one repository.
+A failed publish (export, validation, push rejected, GitHub unreachable) records a failed job with a short message and leaves the previously pushed version in place; just publish again. To try it without GitHub, point `MEALPLANNER_PUBLISH_REPO` at a local bare repository (`git init --bare --initial-branch=main x.git`, seeded with one commit on `main`).
 
-Locally, `VITE_PUBLICATION_DIR=publication npm run dev:static` previews a bundle. The legacy **Generate Plan** workflow was removed: Pages never runs the solver.
+To preview a bundle locally, export it (`db_cli export --months … --out <dir>`) and run `VITE_PUBLICATION_DIR=<dir> npm run dev:static` (paths resolve from the repository root). The old Pages route from this repository (committed `publication/`, **Build Frontend** and **Deploy to Pages** workflows, `scripts/export_pages_publication.sh`) was retired on 2026-10-21; Pages never runs the solver.
 
 ### Phase 2 checks and build scope
 
