@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": "stale_version",
+    "message": "The shopping list changed since you loaded it. Refetch and try again.",
+    "details": [
+      {
+        "field": "expected_version",
+        "message": "2"
+      },
+      {
+        "field": "actual_version",
+        "message": "3"
+      }
+    ]
+  }
+}

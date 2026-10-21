@@ -19,6 +19,8 @@ tags:
     description: Dated weekly plans, their grocery snapshots, and revision history.
   - name: Proposals
     description: Preview, accept, discard, and undo plan changes.
+  - name: Shopping trips
+    description: Shopping trips (called shopping lists in the UI) that cover weekly plans, and week coverage.
   - name: Capabilities
     description: What the calling client may do.
 paths:
@@ -824,14 +826,336 @@ paths:
                   summary: Solver concurrency bound reached
                   externalValue: examples/error-generation-busy.json
 
+  /api/v1/shopping-trips:
+    get:
+      tags: [Shopping trips]
+      operationId: listShoppingTrips
+      summary: List shopping trips
+      description: |-
+        Every shopping trip (shown to users as a "shopping list"), oldest first, each with its weeks and derived items. Open trips follow the weeks' current revisions; done trips are frozen to the revisions they covered. When the API is not SQLite-backed the list is empty.
+      responses:
+        '200':
+          description: Shopping trips, possibly an empty list.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTripList'
+              examples:
+                trips:
+                  summary: One open trip
+                  externalValue: examples/shopping-trips.json
+                noTrips:
+                  summary: No trips yet
+                  externalValue: examples/shopping-trips-empty.json
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+    post:
+      tags: [Shopping trips]
+      operationId: createShoppingTrip
+      summary: Create an open shopping trip for weeks
+      description: |-
+        Creates an open trip (version 1) covering the given plans. A plan belongs to at most one trip of any status (409 week_already_on_trip). name is an optional short label; it defaults to the covered date range. Trips never modify plans or create plan revisions. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      requestBody:
+        required: true
+        description: Plans to cover and an optional label.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShoppingTripRequest'
+      responses:
+        '201':
+          description: The new trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Location:
+              description: Canonical URL of the created resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                created:
+                  summary: Newly created open trip
+                  externalValue: examples/shopping-trip.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}:
+    get:
+      tags: [Shopping trips]
+      operationId: getShoppingTrip
+      summary: Read one shopping trip
+      description: |-
+        Returns the trip with its weeks (coverage, used and current revision) and derived items: the sum, per ingredient and unit, of each covered week's saved grocery rows, with the contributing plan_ids. Items are never stored or edited and there is no pantry or purchase tracking. Item checkboxes are device-local and not part of this resource.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200':
+          description: The trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                open:
+                  summary: Open trip
+                  externalValue: examples/shopping-trip.json
+                done:
+                  summary: Done trip, week changed since shopping
+                  externalValue: examples/shopping-trip-done.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '404':
+          $ref: '#/components/responses/TripNotFound'
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+    delete:
+      tags: [Shopping trips]
+      operationId: deleteShoppingTrip
+      summary: Delete a shopping trip
+      description: |-
+        Deletes the trip in any status, which frees its weeks. Plans are untouched. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      responses:
+        '204':
+          description: Trip deleted.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/weeks:
+    post:
+      tags: [Shopping trips]
+      operationId: addShoppingTripWeek
+      summary: Add a week to an open trip
+      description: |-
+        Adds a plan's week to an open trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when the plan is already on a trip. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        description: The plan to add and the trip version the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTripWeekRequest'
+      responses:
+        '200':
+          description: The updated trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                updated:
+                  summary: Trip with the new week
+                  externalValue: examples/shopping-trip.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripOrPlanNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/weeks/{plan_id}:
+    delete:
+      tags: [Shopping trips]
+      operationId: removeShoppingTripWeek
+      summary: Remove a week from an open trip
+      description: |-
+        Removes the plan's week from an open trip. 409 trip_done on a done trip (reopen it first), 409 last_week for the last remaining week (delete the trip instead), 404 week_not_on_trip when the plan is not on this trip. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      responses:
+        '200':
+          description: The updated trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                updated:
+                  summary: Trip without the week
+                  externalValue: examples/shopping-trip.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripOrPlanNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/done:
+    post:
+      tags: [Shopping trips]
+      operationId: markShoppingTripDone
+      summary: Mark a trip done
+      description: |-
+        Records, for every week, the plan's current revision and snapshot_id; items are frozen to those revisions from now on. 409 trip_not_done when the trip is already done. A plan edited afterwards only shows changed_since_shopping on its week. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        description: The trip version the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpectedVersionRequest'
+      responses:
+        '200':
+          description: The done trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                done:
+                  summary: Done trip
+                  externalValue: examples/shopping-trip-done.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/reopen:
+    post:
+      tags: [Shopping trips]
+      operationId: reopenShoppingTrip
+      summary: Reopen a done trip
+      description: |-
+        Returns a done trip to open; items follow the weeks' current revisions again. 409 trip_not_done when the trip is already open. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        description: The trip version the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpectedVersionRequest'
+      responses:
+        '200':
+          description: The reopened trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                reopened:
+                  summary: Open trip
+                  externalValue: examples/shopping-trip.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/coverage:
+    get:
+      tags: [Shopping trips]
+      operationId: getCoverage
+      summary: Read week coverage for a date range
+      description: |-
+        For every plan whose Monday-through-Sunday week overlaps the inclusive range (same range rules as listPlans), reports coverage derived from shopping trips: not_covered (no trip), on_list (open trip) or covered (done trip), with the trip_id and changed_since_shopping (true when the plan's current revision is newer than the revision the done trip covered). Coverage is never stored on the plan, so plan summaries are unchanged. When the API is not SQLite-backed every plan is not_covered.
+      parameters:
+        - $ref: '#/components/parameters/CoverageFrom'
+        - $ref: '#/components/parameters/CoverageTo'
+      responses:
+        '200':
+          description: Per-plan coverage, ordered by week_start.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoverageList'
+              examples:
+                coverage:
+                  summary: Covered, on a list, and not covered
+                  externalValue: examples/coverage.json
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '503':
+          $ref: '#/components/responses/SourceFailure'
   /api/v1/capabilities:
     get:
       tags: [Capabilities]
       operationId: getCapabilities
       summary: Read what this client may do
       description: |-
-        can_edit_plans is true only when the API is backed by SQLite and the request
-        comes from a loopback address. Clients must use it, never their own guess, to
+        can_edit_plans and can_edit_shopping_trips are true only when the API is backed by
+        SQLite and the request comes from a loopback address. Clients must use it, never their own guess, to
         decide whether to offer editing. The server re-checks authorization on every
         mutation regardless of this value.
       responses:
@@ -884,6 +1208,45 @@ components:
         maxLength: 128
         pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
       example: prop_9b1f0c2e4d5a4f7c8a3e6d1b2c0f4a55
+    TripId:
+      name: trip_id
+      in: path
+      required: true
+      description: Opaque shopping trip identifier; 1–128 ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+      example: trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b
+    ExpectedVersion:
+      name: expected_version
+      in: query
+      required: true
+      description: The trip version the client is looking at (DELETE has no body). A mismatch returns 409 stale_version.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      example: 2
+    CoverageFrom:
+      name: from
+      in: query
+      required: true
+      description: Inclusive start date in ISO 8601 YYYY-MM-DD format.
+      schema:
+        type: string
+        format: date
+      example: '2026-10-01'
+    CoverageTo:
+      name: to
+      in: query
+      required: true
+      description: Inclusive end date in ISO 8601 YYYY-MM-DD format.
+      schema:
+        type: string
+        format: date
+      example: '2026-10-31'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -940,6 +1303,88 @@ components:
             readOnly:
               summary: API is serving the JSON snapshot
               externalValue: examples/error-read-only.json
+    TripInvalidRequest:
+      description: Malformed JSON body, unknown or invalid field, bad identifier, or a missing or invalid expected_version.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownField:
+              summary: Invalid or unknown body field
+              externalValue: examples/error-invalid-body.json
+    TripNotFound:
+      description: No shopping trip exists for the requested identifier.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownTrip:
+              summary: Unknown trip identifier
+              externalValue: examples/error-trip-not-found.json
+    TripOrPlanNotFound:
+      description: Unknown trip (trip_not_found), unknown plan (plan_not_found), or a plan that is not on the trip (week_not_on_trip).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownTrip:
+              summary: Unknown trip identifier
+              externalValue: examples/error-trip-not-found.json
+            unknownPlan:
+              summary: Unknown plan identifier
+              externalValue: examples/error-plan-not-found.json
+            weekNotOnTrip:
+              summary: Plan is not on this trip
+              externalValue: examples/error-week-not-on-trip.json
+    TripConflict:
+      description: stale_version (expected_version is behind), week_already_on_trip, trip_done (needs an open trip), trip_not_done (needs a done trip), or last_week. Nothing was changed.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            staleVersion:
+              summary: expected_version is behind the current version
+              externalValue: examples/error-stale-version.json
+            weekAlreadyOnTrip:
+              summary: Plan is already on a trip
+              externalValue: examples/error-week-already-on-trip.json
+            tripDone:
+              summary: Trip is done; reopen it first
+              externalValue: examples/error-trip-done.json
+            tripNotDone:
+              summary: Trip is not done
+              externalValue: examples/error-trip-not-done.json
+            lastWeek:
+              summary: Cannot remove the only week
+              externalValue: examples/error-last-week.json
     InvalidRequest:
       description: Missing or malformed input, or an invalid date range.
       headers:
@@ -1254,11 +1699,14 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [can_edit_plans]
+      required: [can_edit_plans, can_edit_shopping_trips]
       properties:
         can_edit_plans:
           type: boolean
           description: True only for a loopback client of a SQLite-backed API.
+        can_edit_shopping_trips:
+          type: boolean
+          description: True under the same conditions; gates creating, changing, finishing, and deleting shopping trips.
     FillMonthRequest:
       type: object
       additionalProperties: false
@@ -1471,6 +1919,175 @@ components:
           description: Oldest first.
           items:
             $ref: '#/components/schemas/RevisionSummary'
+    CoverageState:
+      type: string
+      enum: [not_covered, on_list, covered]
+      description: not_covered (no trip), on_list (open trip), covered (done trip).
+    ShoppingTripWeek:
+      type: object
+      additionalProperties: false
+      required: [plan_id, week_start, week_end, revision, snapshot_id, current_revision, coverage, changed_since_shopping]
+      properties:
+        plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        revision:
+          type: integer
+          minimum: 1
+          description: The plan revision this trip's items use for the week; the current revision on an open trip, the covered revision on a done trip.
+        snapshot_id:
+          type: string
+          minLength: 1
+          description: snapshot_id of that revision.
+        current_revision:
+          type: integer
+          minimum: 1
+          description: The plan's current revision when the trip was read.
+        coverage:
+          type: string
+          enum: [on_list, covered]
+          description: on_list for an open trip, covered for a done trip.
+        changed_since_shopping:
+          type: boolean
+          description: True on a done trip when current_revision is newer than revision.
+    ShoppingTripItem:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, display, quantity, unit, section, plan_ids]
+      properties:
+        ingredient_id:
+          type: string
+          minLength: 1
+        display:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+          description: Sum over the contributing weeks for this ingredient and unit.
+        unit:
+          type: string
+          enum: [g, ml, units]
+        section:
+          type: string
+        plan_ids:
+          type: array
+          description: Plans whose grocery rows contribute to this item, in week order.
+          items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+    ShoppingTrip:
+      type: object
+      additionalProperties: false
+      required: [trip_id, name, status, version, created_at, updated_at, completed_at, weeks, items]
+      description: A shopping trip (called a shopping list in the UI) with its weeks and derived items. Reused by the static publication.
+      properties:
+        trip_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        status:
+          type: string
+          enum: [open, done]
+        version:
+          type: integer
+          minimum: 1
+          description: Starts at 1 and increases by 1 on every mutation; the optimistic-concurrency token.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the trip was marked done; null while open.
+        weeks:
+          type: array
+          minItems: 1
+          description: Covered weeks, ordered by week_start.
+          items:
+            $ref: '#/components/schemas/ShoppingTripWeek'
+        items:
+          type: array
+          description: Derived sum of the weeks' saved grocery rows per ingredient and unit, grouped by section.
+          items:
+            $ref: '#/components/schemas/ShoppingTripItem'
+    ShoppingTripList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShoppingTrip'
+    CreateShoppingTripRequest:
+      type: object
+      additionalProperties: false
+      required: [plan_ids]
+      properties:
+        plan_ids:
+          type: array
+          minItems: 1
+          maxItems: 60
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        name:
+          type: [string, 'null']
+          maxLength: 80
+          description: Optional short label; defaults to the covered date range.
+    AddTripWeekRequest:
+      type: object
+      additionalProperties: false
+      required: [plan_id, expected_version]
+      properties:
+        plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        expected_version:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+    ExpectedVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+    WeekCoverage:
+      type: object
+      additionalProperties: false
+      required: [plan_id, week_start, week_end, coverage, trip_id, changed_since_shopping]
+      properties:
+        plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        coverage:
+          $ref: '#/components/schemas/CoverageState'
+        trip_id:
+          anyOf:
+            - {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+            - type: 'null'
+        changed_since_shopping:
+          type: boolean
+    CoverageList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeekCoverage'
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -1483,7 +2100,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy]
+              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week]
             message:
               type: string
             details:

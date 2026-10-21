@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import threading
 from datetime import date
 
+from ..domain.shopping_trip import ShoppingTrip, StaleVersion, TripNotFound, WeekAlreadyOnTrip
 from ..domain.snapshot import JsonObject, PlanSnapshot
 from ..domain.weekly_plan import (
     DuplicateWeek,
@@ -110,3 +112,62 @@ class InMemoryPlanReadAdapter:
     def get_shopping_list(self, plan_id: str) -> JsonObject | None:
         snap = self._repo.current_snapshot(plan_id)
         return deepcopy(snap.shopping_list) if snap else None
+
+
+class InMemoryShoppingTripRepository:
+    """Reference implementation of ShoppingTripRepository (plan existence is the service's job)."""
+
+    def __init__(self) -> None:
+        self._trips: dict[str, ShoppingTrip] = {}
+        self._owner: dict[str, str] = {}  # plan_id -> trip_id (the one-trip-per-week index)
+        self._lock = threading.Lock()
+
+    def _claim(self, trip: ShoppingTrip) -> None:
+        for plan_id in trip.plan_ids:
+            owner = self._owner.get(plan_id)
+            if owner is not None and owner != trip.trip_id:
+                raise WeekAlreadyOnTrip(plan_id, owner)
+
+    def _release(self, trip_id: str) -> None:
+        for plan_id in [p for p, t in self._owner.items() if t == trip_id]:
+            del self._owner[plan_id]
+
+    def _index(self, trip: ShoppingTrip) -> None:
+        self._release(trip.trip_id)
+        for plan_id in trip.plan_ids:
+            self._owner[plan_id] = trip.trip_id
+
+    def create(self, trip: ShoppingTrip) -> None:
+        with self._lock:
+            if trip.trip_id in self._trips:
+                raise ValueError(f"trip {trip.trip_id} already exists")
+            self._claim(trip)
+            self._trips[trip.trip_id] = trip
+            self._index(trip)
+
+    def get(self, trip_id: str) -> ShoppingTrip | None:
+        return self._trips.get(trip_id)
+
+    def list(self) -> list[ShoppingTrip]:
+        return sorted(self._trips.values(), key=lambda t: (t.created_at, t.trip_id))
+
+    def save(self, trip: ShoppingTrip, expected_version: int) -> None:
+        with self._lock:
+            stored = self._trips.get(trip.trip_id)
+            if stored is None:
+                raise TripNotFound(trip.trip_id)
+            if stored.version != expected_version:
+                raise StaleVersion(expected_version, stored.version)
+            self._claim(trip)
+            self._trips[trip.trip_id] = trip
+            self._index(trip)
+
+    def delete(self, trip_id: str, expected_version: int) -> None:
+        with self._lock:
+            stored = self._trips.get(trip_id)
+            if stored is None:
+                raise TripNotFound(trip_id)
+            if stored.version != expected_version:
+                raise StaleVersion(expected_version, stored.version)
+            del self._trips[trip_id]
+            self._release(trip_id)

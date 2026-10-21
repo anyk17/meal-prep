@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "last_week",
+    "message": "A shopping list needs at least one week. Delete the list instead.",
+    "details": []
+  }
+}

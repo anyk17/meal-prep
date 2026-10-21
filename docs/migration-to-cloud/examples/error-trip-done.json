@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "trip_done",
+    "message": "This shopping list is done. Reopen it to change its weeks.",
+    "details": []
+  }
+}

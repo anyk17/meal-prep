@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "plan_id": "plan_2026_10_12",
+      "week_start": "2026-10-12",
+      "week_end": "2026-10-18",
+      "coverage": "covered",
+      "trip_id": "trip_8a7d6c5b4e3f2a1b0c9d8e7f6a5b4c3d",
+      "changed_since_shopping": true
+    },
+    {
+      "plan_id": "plan_2026_10_19",
+      "week_start": "2026-10-19",
+      "week_end": "2026-10-25",
+      "coverage": "on_list",
+      "trip_id": "trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b",
+      "changed_since_shopping": false
+    },
+    {
+      "plan_id": "plan_2026_11_02",
+      "week_start": "2026-11-02",
+      "week_end": "2026-11-08",
+      "coverage": "not_covered",
+      "trip_id": null,
+      "changed_since_shopping": false
+    }
+  ]
+}

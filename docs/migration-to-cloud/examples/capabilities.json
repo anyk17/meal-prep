@@ -1,3 +1,4 @@
 {
-  "can_edit_plans": true
+  "can_edit_plans": true,
+  "can_edit_shopping_trips": true
 }

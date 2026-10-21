@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "week_not_on_trip",
+    "message": "That week is not on this shopping list.",
+    "details": []
+  }
+}

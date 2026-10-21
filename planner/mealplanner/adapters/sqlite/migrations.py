@@ -106,6 +106,34 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )""",
         ),
     ),
+    (
+        2,
+        "shopping trips",
+        (
+            """CREATE TABLE shopping_trips (
+                trip_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('open', 'done')),
+                version INTEGER NOT NULL CHECK (version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                CHECK ((status = 'done') = (completed_at IS NOT NULL))
+            )""",
+            # plan_id is UNIQUE: a week belongs to at most one trip, whatever its status.
+            # covered_* are set exactly when the trip is done and point at immutable revisions.
+            """CREATE TABLE shopping_trip_weeks (
+                trip_id TEXT NOT NULL REFERENCES shopping_trips (trip_id) ON DELETE CASCADE,
+                plan_id TEXT NOT NULL UNIQUE REFERENCES plans (plan_id),
+                covered_revision INTEGER,
+                covered_snapshot_id TEXT,
+                PRIMARY KEY (trip_id, plan_id),
+                CHECK ((covered_revision IS NULL) = (covered_snapshot_id IS NULL)),
+                FOREIGN KEY (plan_id, covered_revision)
+                    REFERENCES plan_revisions (plan_id, revision)
+            )""",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

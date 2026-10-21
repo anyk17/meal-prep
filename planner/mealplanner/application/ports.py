@@ -9,6 +9,7 @@ from datetime import date
 from typing import Protocol
 
 from ..domain.planner_inputs import PlannerInputs
+from ..domain.shopping_trip import ShoppingTrip
 from ..domain.snapshot import JsonObject
 from ..domain.solution import MealPlanSolution
 from ..domain.weekly_plan import PlanRevision, Proposal, RetryRecord, WeeklyPlan
@@ -93,3 +94,30 @@ class PlanWorkflowRepository(Protocol):
 
     def delete_proposal(self, proposal_id: str) -> None:
         """Remove a proposal if present."""
+
+
+class ShoppingTripRepository(Protocol):
+    """Storage boundary for ShoppingTrip aggregates (in-memory and SQLite adapters).
+
+    Every write is atomic and enforces, in storage as well as in the domain, that a
+    plan belongs to at most one trip of any status. Trips only reference plans; they
+    never write them.
+    """
+
+    def create(self, trip: ShoppingTrip) -> None:
+        """Insert a new trip with its weeks. Raises WeekAlreadyOnTrip when any of its
+        plans is already on a trip, PlanNotFound when a plan does not exist."""
+
+    def get(self, trip_id: str) -> ShoppingTrip | None:
+        """Return one trip, or None."""
+
+    def list(self) -> list[ShoppingTrip]:
+        """Return every trip, oldest first."""
+
+    def save(self, trip: ShoppingTrip, expected_version: int) -> None:
+        """Replace the trip's fields and weeks if its stored version is expected_version
+        (the caller passes trip.version == expected_version + 1). Raises TripNotFound,
+        StaleVersion, WeekAlreadyOnTrip, or PlanNotFound."""
+
+    def delete(self, trip_id: str, expected_version: int) -> None:
+        """Delete the trip (freeing its weeks). Raises TripNotFound or StaleVersion."""

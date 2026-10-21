@@ -21,6 +21,7 @@ from ...application.plan_reads import PlanReadService
 from ...application.ports import PlanGenerator, PlanReadRepository
 from ...domain.snapshot import SourceInvalidError
 from .read_routes import register_read_routes
+from .trip_routes import register_trip_routes
 from .write_routes import GenerationGate, register_write_routes
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -108,6 +109,20 @@ def _build_workflow_service(
     )
 
 
+def _build_trip_service(
+    db_path: Path | str, timezone: str | None, clock: Callable[[], datetime] | None
+) -> Any:
+    from ...adapters.sqlite.store import SqlitePlanRepository, SqliteShoppingTripRepository
+    from ...application.shopping_trips import ShoppingTripService
+
+    tz = ZoneInfo(timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota"))
+    return ShoppingTripService(
+        SqliteShoppingTripRepository(db_path),
+        SqlitePlanRepository(db_path),
+        clock or (lambda: datetime.now(tz)),
+    )
+
+
 def create_app(
     repository: PlanReadRepository | None = None,
     *,
@@ -144,6 +159,7 @@ def create_app(
     app.config["PLAN_SOURCE_FAILURE"] = None
     app.config["PLAN_WORKFLOW_SERVICE"] = None
     app.config["PLAN_WRITE_FAILURE"] = False
+    app.config["SHOPPING_TRIP_SERVICE"] = None
     sqlite_path = db_path or os.environ.get("MEALPLANNER_DB")
     if repository is not None:
         app.config["PLAN_READ_SERVICE"] = PlanReadService(repository)
@@ -157,6 +173,7 @@ def create_app(
             app.config["PLAN_WORKFLOW_SERVICE"] = _build_workflow_service(
                 sqlite_path, timezone, clock, generator, solver_timeout_seconds, proposal_ttl
             )
+            app.config["SHOPPING_TRIP_SERVICE"] = _build_trip_service(sqlite_path, timezone, clock)
         except DatabaseError:
             app.config["PLAN_SOURCE_FAILURE"] = "source_unavailable"
         except (sqlite3.Error, ValueError, KeyError):  # unreadable or corrupt file, bad timezone
@@ -204,6 +221,7 @@ def create_app(
     register_write_routes(app, _error, _is_loopback_request, gate)
 
     register_read_routes(app, _error)
+    register_trip_routes(app, _error, _is_loopback_request)
 
     return app
 

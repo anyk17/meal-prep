@@ -21,6 +21,13 @@ from typing import Any
 from ...application.errors import PlanNotFound
 from ...domain.catalog import Ingredient, Recipe, Rules
 from ...domain.planner_inputs import PlannerInputs
+from ...domain.shopping_trip import (
+    ShoppingTrip,
+    StaleVersion,
+    TripNotFound,
+    TripWeek,
+    WeekAlreadyOnTrip,
+)
 from ...domain.snapshot import JsonObject, PlanSnapshot
 from ...domain.weekly_plan import (
     DuplicateWeek,
@@ -307,6 +314,163 @@ class SqlitePlanRepository:
     def count_proposals(self) -> int:
         with self._conn() as conn:
             return int(conn.execute("SELECT COUNT(*) AS n FROM proposals").fetchone()["n"])
+
+
+# ---------------------------------------------------------------- shopping trips
+
+
+def _insert_trip_weeks(conn: sqlite3.Connection, trip: ShoppingTrip) -> None:
+    conn.executemany(
+        "INSERT INTO shopping_trip_weeks (trip_id, plan_id, covered_revision,"
+        " covered_snapshot_id) VALUES (?, ?, ?, ?)",
+        [
+            (trip.trip_id, w.plan_id, w.covered_revision, w.covered_snapshot_id)
+            for w in trip.weeks
+        ],
+    )
+
+
+def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> list[ShoppingTrip]:
+    trips = []
+    for row in rows:
+        weeks = conn.execute(
+            "SELECT w.plan_id, p.week_start, w.covered_revision, w.covered_snapshot_id"
+            " FROM shopping_trip_weeks w JOIN plans p ON p.plan_id = w.plan_id"
+            " WHERE w.trip_id = ? ORDER BY p.week_start, w.plan_id",
+            (row["trip_id"],),
+        ).fetchall()
+        trips.append(
+            ShoppingTrip(
+                trip_id=row["trip_id"],
+                name=row["name"],
+                status=row["status"],
+                version=row["version"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+                completed_at=(
+                    datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
+                ),
+                weeks=tuple(
+                    TripWeek(
+                        w["plan_id"],
+                        date.fromisoformat(w["week_start"]),
+                        w["covered_revision"],
+                        w["covered_snapshot_id"],
+                    )
+                    for w in weeks
+                ),
+            )
+        )
+    return trips
+
+
+class SqliteShoppingTripRepository:
+    """ShoppingTripRepository backed by SQLite (migrated on construction).
+
+    UNIQUE(plan_id) on shopping_trip_weeks enforces one trip per week; foreign keys
+    tie weeks to plans (and covered revisions to immutable plan_revisions rows).
+    """
+
+    def __init__(self, db_path: Path | str) -> None:
+        self.db_path = Path(db_path)
+        open_database(self.db_path).close()
+
+    def _conn(self) -> closing[sqlite3.Connection]:
+        return closing(connect(self.db_path))
+
+    def _translate(self, exc: sqlite3.IntegrityError, trip: ShoppingTrip) -> Exception:
+        text = str(exc)
+        if "UNIQUE" in text and "shopping_trip_weeks" in text:
+            with self._conn() as conn:
+                for week in trip.weeks:
+                    row = conn.execute(
+                        "SELECT trip_id FROM shopping_trip_weeks WHERE plan_id = ?",
+                        (week.plan_id,),
+                    ).fetchone()
+                    if row is not None and row["trip_id"] != trip.trip_id:
+                        return WeekAlreadyOnTrip(week.plan_id, row["trip_id"])
+            return WeekAlreadyOnTrip(trip.weeks[0].plan_id)
+        if "FOREIGN KEY" in text:
+            return PlanNotFound("a plan on the trip does not exist")
+        return exc
+
+    def create(self, trip: ShoppingTrip) -> None:
+        try:
+            with self._conn() as conn, transaction(conn):
+                conn.execute(
+                    "INSERT INTO shopping_trips (trip_id, name, status, version, created_at,"
+                    " updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        trip.trip_id,
+                        trip.name,
+                        trip.status,
+                        trip.version,
+                        _dt(trip.created_at),
+                        _dt(trip.updated_at),
+                        _dt(trip.completed_at) if trip.completed_at else None,
+                    ),
+                )
+                _insert_trip_weeks(conn, trip)
+        except sqlite3.IntegrityError as exc:
+            raise self._translate(exc, trip) from exc
+
+    def get(self, trip_id: str) -> ShoppingTrip | None:
+        with self._conn() as conn:
+            conn.execute("BEGIN")  # one snapshot across trip and weeks
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM shopping_trips WHERE trip_id = ?", (trip_id,)
+                ).fetchall()
+                trips = _trips_from_rows(conn, rows)
+            finally:
+                conn.execute("COMMIT")
+        return trips[0] if trips else None
+
+    def list(self) -> list[ShoppingTrip]:
+        with self._conn() as conn:
+            conn.execute("BEGIN")
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM shopping_trips ORDER BY created_at, trip_id"
+                ).fetchall()
+                return _trips_from_rows(conn, rows)
+            finally:
+                conn.execute("COMMIT")
+
+    def _check_version(self, conn: sqlite3.Connection, trip_id: str, expected: int) -> None:
+        row = conn.execute(
+            "SELECT version FROM shopping_trips WHERE trip_id = ?", (trip_id,)
+        ).fetchone()
+        if row is None:
+            raise TripNotFound(trip_id)
+        if row["version"] != expected:
+            raise StaleVersion(expected, row["version"])
+
+    def save(self, trip: ShoppingTrip, expected_version: int) -> None:
+        try:
+            with self._conn() as conn, transaction(conn):
+                self._check_version(conn, trip.trip_id, expected_version)
+                conn.execute(
+                    "UPDATE shopping_trips SET name = ?, status = ?, version = ?,"
+                    " updated_at = ?, completed_at = ? WHERE trip_id = ?",
+                    (
+                        trip.name,
+                        trip.status,
+                        trip.version,
+                        _dt(trip.updated_at),
+                        _dt(trip.completed_at) if trip.completed_at else None,
+                        trip.trip_id,
+                    ),
+                )
+                conn.execute("DELETE FROM shopping_trip_weeks WHERE trip_id = ?", (trip.trip_id,))
+                _insert_trip_weeks(conn, trip)
+        except sqlite3.IntegrityError as exc:
+            raise self._translate(exc, trip) from exc
+
+    def delete(self, trip_id: str, expected_version: int) -> None:
+        with self._conn() as conn, transaction(conn):
+            self._check_version(conn, trip_id, expected_version)
+            conn.execute("DELETE FROM shopping_trips WHERE trip_id = ?", (trip_id,))  # cascades
 
 
 # ---------------------------------------------------------------- read adapter

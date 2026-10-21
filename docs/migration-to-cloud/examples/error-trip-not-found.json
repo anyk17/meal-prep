@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "trip_not_found",
+    "message": "No shopping list exists for the requested trip_id.",
+    "details": []
+  }
+}

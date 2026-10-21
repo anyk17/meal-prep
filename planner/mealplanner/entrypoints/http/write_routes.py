@@ -275,7 +275,8 @@ def register_write_routes(
 
     @app.get("/api/v1/capabilities")
     def capabilities():
-        return jsonify({"can_edit_plans": can_edit()})
+        editable = can_edit()
+        return jsonify({"can_edit_plans": editable, "can_edit_shopping_trips": editable})
 
     @app.post("/api/v1/plans")
     def create_plan():

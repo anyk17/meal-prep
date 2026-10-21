@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": "week_already_on_trip",
+    "message": "A week can be on only one shopping list. Remove it from the other list first.",
+    "details": [
+      {
+        "field": "plan_id",
+        "message": "plan_2026_10_26"
+      },
+      {
+        "field": "trip_id",
+        "message": "trip_8a7d6c5b4e3f2a1b0c9d8e7f6a5b4c3d"
+      }
+    ]
+  }
+}

@@ -43,6 +43,13 @@ EXPECTED_PATHS = {
     "/api/v1/plans/{plan_id}/undo": {"post"},
     "/api/v1/capabilities": {"get"},
     "/api/v1/months/{month}/fill": {"post"},
+    "/api/v1/shopping-trips": {"get", "post"},
+    "/api/v1/shopping-trips/{trip_id}": {"get", "delete"},
+    "/api/v1/shopping-trips/{trip_id}/weeks": {"post"},
+    "/api/v1/shopping-trips/{trip_id}/weeks/{plan_id}": {"delete"},
+    "/api/v1/shopping-trips/{trip_id}/done": {"post"},
+    "/api/v1/shopping-trips/{trip_id}/reopen": {"post"},
+    "/api/v1/coverage": {"get"},
 }
 # POST operations whose body is an empty object (the identifier is in the path).
 EMPTY_BODY_PATHS = {"/api/v1/months/{month}/fill"}
@@ -748,6 +755,12 @@ def self_test_contract(spec):
         "missing fill 403": lambda d: d["paths"]["/api/v1/months/{month}/fill"]["post"][
             "responses"
         ].pop("403"),
+        "missing trip delete 403": lambda d: d["paths"]["/api/v1/shopping-trips/{trip_id}"][
+            "delete"
+        ]["responses"].pop("403"),
+        "open trip done body": lambda d: d["components"]["schemas"][
+            "ExpectedVersionRequest"
+        ].__setitem__("additionalProperties", True),
         "missing 403": lambda d: d["paths"]["/api/v1/plans/{plan_id}/undo"]["post"][
             "responses"
         ].pop("403"),
