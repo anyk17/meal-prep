@@ -1,7 +1,7 @@
 """Plan write/history routes. Parsing, error mapping, and serialization only.
 
 All lifecycle rules live in PlanWorkflowService; this module never decides
-business outcomes. Registered by api.create_app.
+business outcomes. Registered by app.create_app.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from .plan_domain import (
+from ...application.errors import InvalidRequest, PlanNotFound
+from ...application.plan_workflows import PlanWorkflowService
+from ...domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
     InputBasisChanged,
@@ -31,8 +33,6 @@ from .plan_domain import (
     WeekNotEditable,
     WorkflowError,
 )
-from .plan_workflows import PlanWorkflowService
-from .read_api import InvalidRequest, PlanNotFound
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")

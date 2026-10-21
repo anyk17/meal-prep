@@ -87,8 +87,8 @@ Before running the planner, validate the data structure:
 ```bash
 # From the project root
 export PYTHONPATH=$PYTHONPATH:$(pwd)/planner
-python3 -m mealplanner.cli validate-data data
-python3 -m mealplanner.cli validate-recipe data/recipes/pollo_asiatico.yml
+python3 -m mealplanner.entrypoints.cli validate-data data
+python3 -m mealplanner.entrypoints.cli validate-recipe data/recipes/pollo_asiatico.yml
 ```
 
 This will check:

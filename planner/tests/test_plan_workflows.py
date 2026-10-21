@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from mealplanner.generation import GeneratedPlan, generate
-from mealplanner.plan_domain import (
+from mealplanner.adapters.memory import InMemoryPlanReadAdapter, InMemoryPlanRepository
+from mealplanner.application.generation import GeneratedPlan, generate
+from mealplanner.domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
-    InMemoryPlanReadAdapter,
-    InMemoryPlanRepository,
     InputBasisChanged,
     InvalidWeek,
     LinkedPairSplit,
@@ -25,12 +24,12 @@ from mealplanner.plan_domain import (
     check_linked_pairs,
     diff_snapshots,
 )
-from mealplanner.plan_workflows import PlanWorkflowService
-from mealplanner.planner_inputs import PlannerInputs
-from mealplanner.read_api import PlanReadService
-from mealplanner.snapshot import validate_snapshot
-from mealplanner.sqlite_store import SqlitePlanReadAdapter, SqlitePlanRepository
-from mealplanner.yaml_input import YamlPlannerInputReader
+from mealplanner.application.plan_workflows import PlanWorkflowService
+from mealplanner.domain.planner_inputs import PlannerInputs
+from mealplanner.application.plan_reads import PlanReadService
+from mealplanner.domain.snapshot import validate_snapshot
+from mealplanner.adapters.sqlite.store import SqlitePlanReadAdapter, SqlitePlanRepository
+from mealplanner.adapters.yaml_inputs import YamlPlannerInputReader
 
 ROOT = Path(__file__).resolve().parents[2]
 INPUTS: PlannerInputs = YamlPlannerInputReader(ROOT / "data").read()
@@ -365,7 +364,7 @@ def test_linked_pair_changes_atomically(env: Env) -> None:
 def test_linked_pair_split_is_rejected() -> None:
     a = real(INPUTS, 1, None)
     b = real(INPUTS, 2, None)
-    from mealplanner.json_snapshot import normalize_snapshot
+    from mealplanner.domain.snapshot import normalize_snapshot
 
     def snap(g):
         return normalize_snapshot(g.plan.model_dump(), g.shopping_list.model_dump(), set(INPUTS.pantry), FUTURE)

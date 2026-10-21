@@ -10,10 +10,10 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
-from mealplanner.api import create_app
-from mealplanner.db import import_inputs
-from mealplanner.generation import GeneratedPlan, generate
-from mealplanner.planner_inputs import PlannerInputs
+from mealplanner.entrypoints.http.app import create_app
+from mealplanner.entrypoints.db_cli import import_inputs
+from mealplanner.application.generation import GeneratedPlan, generate
+from mealplanner.domain.planner_inputs import PlannerInputs
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = yaml.safe_load((ROOT / "docs/migration-to-cloud/openapi.yaml").read_text())
@@ -339,7 +339,7 @@ def test_solver_time_limit_is_wired(db_path, clock, monkeypatch) -> None:
         seen["limit"] = max_time_seconds
         return stub_solver(inputs, seed, generated_at)
 
-    monkeypatch.setattr("mealplanner.generation.generate", spy)
+    monkeypatch.setattr("mealplanner.application.generation.generate", spy)
     monkeypatch.setenv("MEALPLANNER_SOLVER_TIMEOUT_SECONDS", "12")
     client = create_app(db_path=db_path, clock=clock).test_client()
     make_plan(client)

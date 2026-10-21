@@ -16,10 +16,11 @@ from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "planner"))
 
-from mealplanner.api import create_app
-from mealplanner.json_snapshot import JsonPlanReadRepository
-from mealplanner.read_api import InvalidRequest, PlanReadService
-from mealplanner.snapshot import PlanSnapshot
+from mealplanner.entrypoints.http.app import create_app
+from mealplanner.adapters.json_snapshot import JsonPlanReadRepository
+from mealplanner.application.errors import InvalidRequest
+from mealplanner.application.plan_reads import PlanReadService
+from mealplanner.domain.snapshot import PlanSnapshot
 
 
 def source_repository() -> JsonPlanReadRepository:
@@ -258,7 +259,7 @@ class FlaskApiTests(unittest.TestCase):
     def test_loopback_binding_is_enforced_by_development_entrypoint(self) -> None:
         from unittest.mock import patch
 
-        from mealplanner import api
+        from mealplanner.entrypoints.http import app as api
 
         with (
             patch.dict("os.environ", {"MEALPLANNER_HOST": "0.0.0.0"}),

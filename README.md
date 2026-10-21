@@ -2,6 +2,8 @@
 
 An automated meal planning system that generates optimal weekly menus based on nutritional constraints, ingredient availability, and variety rules. It includes a modern web interface for viewing your plan and shopping list.
 
+Code layout and layer rules: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Features
 
 -   **Constraint-Based Planning**: Uses Google OR-Tools to ensure nutritional balance (protein targets, carb limits) and variety (no consecutive proteins, recipe repetition limits).
@@ -63,7 +65,7 @@ This command will:
 Start Flask from the repository root in one terminal:
 
 ```bash
-.venv/bin/python -m mealplanner.api
+.venv/bin/python -m mealplanner.entrypoints.http.app
 ```
 
 In another terminal, start the frontend:

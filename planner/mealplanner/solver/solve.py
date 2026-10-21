@@ -3,10 +3,10 @@
 from ortools.sat.python import cp_model
 from pydantic import BaseModel
 
-from .config import Rules, MealType, ProteinType, IngredientKind, Ingredient
+from ..domain.catalog import Rules, MealType, ProteinType, IngredientKind, Ingredient
 from .model import PlannerModel, Slot, create_model
-from .variants import RecipeVariant, expand_variants
-from .planner_inputs import PlannerInputs
+from ..domain.variants import RecipeVariant, expand_variants
+from ..domain.planner_inputs import PlannerInputs
 
 
 class MealPlanSolution(BaseModel):

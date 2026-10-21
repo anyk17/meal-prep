@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-mealplanner = "mealplanner.cli:main"
+mealplanner = "mealplanner.entrypoints.cli:main"
 
 [tool.black]
 line-length = 100
@@ -41,3 +41,6 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.setuptools.packages.find]
+include = ["mealplanner*"]

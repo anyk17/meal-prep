@@ -1,8 +1,8 @@
 """Database administration: import YAML/fixture data, backup, restore.
 
-    python -m mealplanner.db import --db var/mealplanner.db [--fixture] [--replace-inputs]
-    python -m mealplanner.db backup --db var/mealplanner.db --dest var/backup.db
-    python -m mealplanner.db restore --src var/backup.db --db var/mealplanner.db [--force]
+    python -m mealplanner.entrypoints.db_cli import --db var/mealplanner.db [--fixture] [--replace-inputs]
+    python -m mealplanner.entrypoints.db_cli backup --db var/mealplanner.db --dest var/backup.db
+    python -m mealplanner.entrypoints.db_cli restore --src var/backup.db --db var/mealplanner.db [--force]
 """
 
 from __future__ import annotations
@@ -16,22 +16,19 @@ from contextlib import closing
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .json_snapshot import normalize_snapshot
-from .plan_domain import DuplicateWeek, PlanRevision, WeeklyPlan, input_basis
-from .sqlite_store import (
-    LATEST_VERSION,
-    DatabaseError,
+from ..adapters.sqlite.migrations import LATEST_VERSION, DatabaseError, connect, current_version
+from ..adapters.sqlite.store import (
     InputConflict,
     InputImportReport,
     SqlitePlannerInputReader,
     SqlitePlanRepository,
-    connect,
-    current_version,
     import_planner_inputs,
 )
-from .yaml_input import YamlPlannerInputReader
+from ..adapters.yaml_inputs import YamlPlannerInputReader
+from ..domain.snapshot import normalize_snapshot
+from ..domain.weekly_plan import DuplicateWeek, PlanRevision, WeeklyPlan, input_basis
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = PROJECT_ROOT / "var" / "mealplanner.db"  # var/ is git-ignored
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_PLAN_PATH = PROJECT_ROOT / "site/public/plan.json"
@@ -50,7 +47,7 @@ def resolve_db_path(value: str | Path | None) -> Path:
 def import_inputs(
     db_path: Path | str, data_dir: Path | str = DEFAULT_DATA_DIR, *, replace: bool = False
 ) -> InputImportReport:
-    """Import YAML planner inputs. See sqlite_store.import_planner_inputs for the policy."""
+    """Import YAML planner inputs. See adapters.sqlite.store.import_planner_inputs for the policy."""
     return import_planner_inputs(db_path, YamlPlannerInputReader(data_dir).read(), replace=replace)
 
 
@@ -143,7 +140,7 @@ def _print_report(report: InputImportReport) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m mealplanner.db")
+    parser = argparse.ArgumentParser(prog="python -m mealplanner.entrypoints.db_cli")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("import", help="import YAML planner inputs (and optionally the fixture)")
     p.add_argument("--db", help="database path (default: $MEALPLANNER_DB or var/mealplanner.db)")

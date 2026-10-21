@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 
-from .planner_inputs import PlannerInputs
-from .render import PlanOutput, build_plan_output
+from ..domain.planner_inputs import PlannerInputs
+from ..solver.solve import MealPlanSolution, solve_plan
+from .plan_output import PlanOutput, build_plan_output
 from .shopping import ShoppingList, generate_shopping_list
-from .solve import MealPlanSolution, solve_plan
 
 
 @dataclass(frozen=True)

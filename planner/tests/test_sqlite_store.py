@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from mealplanner.api import create_app
-from mealplanner.db import backup, import_fixture, import_inputs, restore
-from mealplanner.db import main as db_main
-from mealplanner.generation import generate
-from mealplanner.json_snapshot import JsonPlanReadRepository
-from mealplanner.plan_domain import (
+from mealplanner.entrypoints.http.app import create_app
+from mealplanner.entrypoints.db_cli import backup, import_fixture, import_inputs, restore
+from mealplanner.entrypoints.db_cli import main as db_main
+from mealplanner.application.generation import generate
+from mealplanner.adapters.json_snapshot import JsonPlanReadRepository
+from mealplanner.domain.weekly_plan import (
     DuplicateWeek,
     PlanRevision,
     RetryRecord,
@@ -24,21 +24,23 @@ from mealplanner.plan_domain import (
     WeeklyPlan,
     stamp_revision,
 )
-from mealplanner.plan_workflows import PlanWorkflowService
-from mealplanner.read_api import PlanReadService
-from mealplanner.sqlite_store import (
+from mealplanner.application.plan_workflows import PlanWorkflowService
+from mealplanner.application.plan_reads import PlanReadService
+from mealplanner.adapters.sqlite.migrations import (
     LATEST_VERSION,
     DatabaseError,
+    connect,
+    migrate,
+    open_database,
+)
+from mealplanner.adapters.sqlite.store import (
     InputConflict,
     PlannerInputsMissing,
     SqlitePlannerInputReader,
     SqlitePlanReadAdapter,
     SqlitePlanRepository,
-    connect,
-    migrate,
-    open_database,
 )
-from mealplanner.yaml_input import YamlPlannerInputReader
+from mealplanner.adapters.yaml_inputs import YamlPlannerInputReader
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"

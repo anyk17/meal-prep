@@ -4,8 +4,8 @@ from typing import NamedTuple
 from ortools.sat.python import cp_model
 from pydantic import BaseModel
 
-from .config import Rules, MealType, ProteinType
-from .variants import RecipeVariant
+from ..domain.catalog import Rules, MealType, ProteinType
+from ..domain.variants import RecipeVariant
 
 
 class Slot(NamedTuple):

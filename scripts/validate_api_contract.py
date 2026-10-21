@@ -20,7 +20,7 @@ from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "planner"))
-from mealplanner.snapshot import (
+from mealplanner.domain.snapshot import (
     SnapshotValidationError,
     canonical_snapshot_id,
     validate_snapshot,

@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 
-from .config import (
+from .catalog import (
     Ingredient,
     IngredientKind,
     MealType,

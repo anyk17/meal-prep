@@ -4,7 +4,7 @@ import shutil
 import pytest
 import yaml
 
-from mealplanner.load import load_data, validate_recipe_file
+from mealplanner.adapters.yaml_inputs import load_data, validate_recipe_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

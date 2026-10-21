@@ -3,7 +3,7 @@
 from typing import Optional
 from pydantic import BaseModel
 
-from .config import Recipe, CarbStrategy, IngredientKind, Ingredient
+from .catalog import Recipe, CarbStrategy, IngredientKind, Ingredient
 
 
 class RecipeVariant(BaseModel):

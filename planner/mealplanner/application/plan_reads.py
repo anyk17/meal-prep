@@ -1,41 +1,13 @@
-"""Storage-independent read services for current weekly plan snapshots."""
+"""Storage-independent read use cases for current weekly plan snapshots."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date
-from typing import Any, Protocol
 
-JsonObject = dict[str, Any]
-
-
-class ReadError(Exception):
-    """Base class for expected plan read failures."""
-
-
-class InvalidRequest(ReadError):
-    """The caller supplied an invalid identifier, date range, or token."""
-
-
-class PlanNotFound(ReadError):
-    """No current plan exists for the supplied plan identifier."""
-
-
-class SnapshotChanged(ReadError):
-    """The supplied shopping identity does not match the current snapshot."""
-
-
-class PlanReadRepository(Protocol):
-    """Read-only storage boundary consumed by the application service."""
-
-    def list_plan_summaries(self) -> list[JsonObject]:
-        """Return summary copies for all currently available plans."""
-
-    def get_plan(self, plan_id: str) -> JsonObject | None:
-        """Return a current plan detail copy, or None when it is absent."""
-
-    def get_shopping_list(self, plan_id: str) -> JsonObject | None:
-        """Return current shopping data, or None when its plan is absent."""
+from ..domain.snapshot import JsonObject
+from .errors import InvalidRequest, PlanNotFound, SnapshotChanged
+from .ports import PlanReadRepository
 
 
 class PlanReadService:

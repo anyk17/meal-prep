@@ -4,8 +4,9 @@ from pathlib import Path
 
 import yaml
 
-from .config import Ingredient, Recipe, Rules
-from .validation import planner_input_errors, validate_recipe, validate_weekly_protein_counts
+from ..domain.catalog import Ingredient, Recipe, Rules
+from ..domain.planner_inputs import PlannerInputs
+from ..domain.policies import planner_input_errors, validate_recipe, validate_weekly_protein_counts
 
 
 class ValidationErrorGroup(ValueError):
@@ -182,3 +183,20 @@ def load_data(data_dir: Path | str) -> DataLoader:
     loader = DataLoader(data_dir)
     loader.load_all()
     return loader
+
+
+class YamlPlannerInputReader:
+    """Load the existing YAML data directory and expose its validated values (PlannerInputReader)."""
+
+    def __init__(self, data_dir: Path | str):
+        self.data_dir = Path(data_dir)
+
+    def read(self) -> PlannerInputs:
+        loader = load_data(self.data_dir)
+        assert loader.rules is not None
+        return PlannerInputs(
+            recipes=loader.recipes,
+            ingredients=loader.ingredients,
+            rules=loader.rules,
+            pantry=tuple(loader.pantry),
+        )

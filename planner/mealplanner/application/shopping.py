@@ -5,8 +5,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from .planner_inputs import PlannerInputs
-from .solve import MealPlanSolution
+from ..domain.planner_inputs import PlannerInputs
+from ..solver.solve import MealPlanSolution
 
 
 class ShoppingItem(BaseModel):

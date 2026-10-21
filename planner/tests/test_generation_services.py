@@ -4,14 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from mealplanner.config import MealType
-from mealplanner.generation import generate
-from mealplanner.planner_inputs import PlannerInputs
-from mealplanner.render import build_plan_output
-from mealplanner.shopping import generate_shopping_list
-from mealplanner.solve import MealPlanSolution
-from mealplanner.variants import RecipeVariant
-from mealplanner.yaml_input import YamlPlannerInputReader
+from mealplanner.domain.catalog import MealType
+from mealplanner.application.generation import generate
+from mealplanner.domain.planner_inputs import PlannerInputs
+from mealplanner.application.plan_output import build_plan_output
+from mealplanner.application.shopping import generate_shopping_list
+from mealplanner.solver.solve import MealPlanSolution
+from mealplanner.domain.variants import RecipeVariant
+from mealplanner.adapters.yaml_inputs import YamlPlannerInputReader
 
 ROOT = Path(__file__).resolve().parents[2]
 

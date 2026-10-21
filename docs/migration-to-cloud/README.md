@@ -1,10 +1,12 @@
 # Household meal planner: NAS app and public read-only calendar
 
+Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
+
 **Status:** Phase 1 and Phase 2 are complete on `feature/cloud-migration-phase-2`. Backend tests, frontend reader tests/lint, both frontend builds, and contract validators pass, and a live browser walkthrough (2026-10-21) confirmed API mode, static mode, the empty bundle, checkmark scoping, refresh pinning, and the API-down error states. Phase 3 (saved weeks, SQLite, home editing) is next; exporter and NAS deployment remain later phases. This document is the current roadmap; later-phase paths and behaviors describe planned work.
 
 ## Starting point and first milestone
 
-Today, `planner/mealplanner/cli.py` loads YAML inputs and runs OR-Tools to generate JSON output. `planner/mealplanner/render.py` combines response construction with file writes. `site/src/App.jsx` fetches `plan.json` and `shopping_list.json` directly; there is no Flask API or database. Plans identify weekday/meal slots without calendar dates, and grocery checks live in the browser.
+Today, `planner/mealplanner/entrypoints/cli.py` loads YAML inputs and runs OR-Tools to generate JSON output. `planner/mealplanner/render.py` (since split into `application/plan_output.py` for construction and `adapters/files.py` for file writes) combined response construction with file writes. `site/src/App.jsx` fetches `plan.json` and `shopping_list.json` directly; there is no Flask API or database. Plans identify weekday/meal slots without calendar dates, and grocery checks live in the browser.
 
 The first delivery milestone combines phases 1 and 2: preserve today's weekly viewer while introducing dates, a local Flask read API backed by the current files, and interchangeable API/static frontend readers. Browser generation and persistence arrive in phase 3; the month view arrives in phase 4. Dates and stable identities belong in the first contract so those later features can evolve without replacing it.
 
@@ -45,7 +47,7 @@ On the server, adapters own YAML/JSON/file/SQL details. Application services use
 
 Apply focused DDD: agree vocabulary and invariants in phase 1, establish boundaries in phase 2, then implement the weekly-plan aggregate and change workflows in phase 3a before persistence. Keep business policies identifiable separately from their OR-Tools encoding so generation and replacements obey the same rules. Prefer small interfaces and ordinary Python models/functions to generic repository frameworks. The database switch should preserve the read contract, frontend, and calculations; migrations, imports, transactions, and concurrency checks remain real work even with those boundaries.
 
-Preserve the policies currently expressed in `data/rules.yml`, ingredient constraints, and `planner/mealplanner/solve.py`: exact weekly protein counts, per-meal protein adjacency, fish dinner limits, lunch carbs and no dinner carbs, carb frequency/adjacency, base-recipe usage limits with linked-pair counting, and lunch/dinner linkage. Cover these with representative cases during phase 2 extraction, phase 3 domain validation, and phase 5 replacements. Any deliberate rule change is separate from changing adapters.
+Preserve the policies currently expressed in `data/rules.yml`, ingredient constraints, and `planner/mealplanner/solver/solve.py`: exact weekly protein counts, per-meal protein adjacency, fish dinner limits, lunch carbs and no dinner carbs, carb frequency/adjacency, base-recipe usage limits with linked-pair counting, and lunch/dinner linkage. Cover these with representative cases during phase 2 extraction, phase 3 domain validation, and phase 5 replacements. Any deliberate rule change is separate from changing adapters.
 
 Use Flask's application factory to wire routes, services, and adapters. Keep this as one application with clear domain and storage boundaries; microservices, event sourcing, a message bus, and separate read/write databases are outside scope. SQLite is a fit for this single-household workload, subject to verification on the chosen NAS. Store its file on a local persistent filesystem volume on the NAS, never on SMB/NFS. Keep state outside the container image and build directory.
 
@@ -280,7 +282,7 @@ The project dependencies are now installed and usable by the agent. The agent sa
 From the repository root, start Flask in one terminal:
 
 ```sh
-.venv/bin/python -m mealplanner.api
+.venv/bin/python -m mealplanner.entrypoints.http.app
 ```
 
 In another WSL terminal:
@@ -307,8 +309,8 @@ Plan changes (create, preview/accept regeneration, undo) need the SQLite store. 
 
 ```sh
 cd /home/julopez/dev/meal-prep
-.venv/bin/python -m mealplanner.db import --fixture   # inputs + the sample week into var/mealplanner.db
-MEALPLANNER_DB=var/mealplanner.db .venv/bin/python -m mealplanner.api
+.venv/bin/python -m mealplanner.entrypoints.db_cli import --fixture   # inputs + the sample week into var/mealplanner.db
+MEALPLANNER_DB=var/mealplanner.db .venv/bin/python -m mealplanner.entrypoints.http.app
 ```
 
 Then start the frontend as above (`npm run dev:api` in `site/`). `GET /api/v1/capabilities` reports `can_edit_plans`, which is true only for loopback clients of a SQLite-backed API. Without `MEALPLANNER_DB` the API serves the JSON snapshot and rejects writes with `403 read_only`; non-loopback writes get `403 forbidden`. Optional settings: `MEALPLANNER_TIMEZONE` (default `America/Bogota`, also the clock for "future week" checks), `MEALPLANNER_SOLVER_TIMEOUT_SECONDS` (default 30) and `MEALPLANNER_MAX_CONCURRENT_GENERATIONS` (default 1; extra requests get `503 generation_busy` with `Retry-After`).

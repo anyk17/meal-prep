@@ -2,10 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
 
-from .config import Ingredient, Recipe, Rules
-from .validation import planner_input_errors, validate_weekly_protein_counts
+from .catalog import Ingredient, Recipe, Rules
+from .policies import planner_input_errors, validate_weekly_protein_counts
 
 
 @dataclass(frozen=True)
@@ -36,10 +35,3 @@ class PlannerInputs:
             raise ValueError(
                 "Invalid planner inputs:\n" + "\n".join(f"- {error}" for error in errors)
             )
-
-
-class PlannerInputReader(Protocol):
-    """Source adapter that returns fully validated planner inputs."""
-
-    def read(self) -> PlannerInputs:
-        """Read and validate one complete planner input set."""

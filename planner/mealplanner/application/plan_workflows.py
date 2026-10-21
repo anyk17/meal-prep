@@ -12,9 +12,9 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .generation import GeneratedPlan, generate
-from .json_snapshot import normalize_snapshot
-from .plan_domain import (
+from ..domain.planner_inputs import PlannerInputs
+from ..domain.snapshot import PlanSnapshot, normalize_snapshot
+from ..domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
     InputBasisChanged,
@@ -22,7 +22,6 @@ from .plan_domain import (
     MutationResult,
     NothingToUndo,
     PlanRevision,
-    PlanWorkflowRepository,
     Proposal,
     ProposalExpired,
     ProposalNotFound,
@@ -38,9 +37,9 @@ from .plan_domain import (
     input_basis,
     stamp_revision,
 )
-from .planner_inputs import PlannerInputReader, PlannerInputs
-from .read_api import InvalidRequest, PlanNotFound
-from .snapshot import PlanSnapshot
+from .errors import InvalidRequest, PlanNotFound
+from .generation import GeneratedPlan, generate
+from .ports import PlannerInputReader, PlanWorkflowRepository
 
 Generator = Callable[[PlannerInputs, int, str | None], GeneratedPlan]
 Clock = Callable[[], datetime]  # must return a timezone-aware datetime
