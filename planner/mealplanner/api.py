@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 from datetime import date
 from ipaddress import ip_address
 from pathlib import Path
@@ -86,8 +87,12 @@ def create_app(
     pantry_path: Path | None = None,
     week_start: str | date | None = None,
     timezone: str | None = None,
+    db_path: Path | str | None = None,
 ) -> Any:
-    """Create the read-only API. Source files are loaded and validated once."""
+    """Create the read-only API. Source files are loaded and validated once.
+
+    With db_path (or MEALPLANNER_DB) reads come from the SQLite store instead.
+    """
     try:
         from flask import Flask, jsonify, request
     except ModuleNotFoundError as exc:
@@ -100,8 +105,19 @@ def create_app(
     app.config["JSON_SORT_KEYS"] = False
     app.config["PLAN_READ_SERVICE"] = None
     app.config["PLAN_SOURCE_FAILURE"] = None
+    sqlite_path = db_path or os.environ.get("MEALPLANNER_DB")
     if repository is not None:
         app.config["PLAN_READ_SERVICE"] = PlanReadService(repository)
+    elif sqlite_path:
+        # Opt-in: serve current revisions from SQLite instead of the JSON snapshot.
+        try:
+            from .sqlite_store import DatabaseError, SqlitePlanReadAdapter
+
+            app.config["PLAN_READ_SERVICE"] = PlanReadService(SqlitePlanReadAdapter(sqlite_path))
+        except DatabaseError:
+            app.config["PLAN_SOURCE_FAILURE"] = "source_unavailable"
+        except (sqlite3.Error, ValueError):  # unreadable or corrupt file
+            app.config["PLAN_SOURCE_FAILURE"] = "source_invalid"
     else:
         try:
             configured_start = _configured_week_start(week_start)

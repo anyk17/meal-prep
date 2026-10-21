@@ -29,6 +29,7 @@ from mealplanner.plan_workflows import PlanWorkflowService
 from mealplanner.planner_inputs import PlannerInputs
 from mealplanner.read_api import PlanReadService
 from mealplanner.snapshot import validate_snapshot
+from mealplanner.sqlite_store import SqlitePlanReadAdapter, SqlitePlanRepository
 from mealplanner.yaml_input import YamlPlannerInputReader
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,9 +79,22 @@ class Calls:
         return real(inputs, self.pin if self.pin is not None else seed, generated_at)
 
 
+def make_repo(kind: str, tmp_path: Path):
+    """Return (repository, read adapter) for the "memory" or "sqlite" backend."""
+    if kind == "memory":
+        repo = InMemoryPlanRepository()
+        return repo, InMemoryPlanReadAdapter(repo)
+    repo = SqlitePlanRepository(tmp_path / "plans.db")
+    return repo, SqlitePlanReadAdapter(tmp_path / "plans.db")
+
+
+def proposal_count(repo) -> int:
+    return len(repo._proposals) if isinstance(repo, InMemoryPlanRepository) else repo.count_proposals()
+
+
 class Env:
-    def __init__(self) -> None:
-        self.repo = InMemoryPlanRepository()
+    def __init__(self, kind: str = "memory", tmp_path: Path | None = None) -> None:
+        self.repo, self.read_adapter = make_repo(kind, tmp_path)
         self.clock = Clock()
         self.solver = Calls()
         self.reader = Reader()
@@ -89,9 +103,10 @@ class Env:
         )
 
 
-@pytest.fixture
-def env() -> Env:
-    return Env()
+@pytest.fixture(params=["memory", "sqlite"])
+def env(request, tmp_path) -> Env:
+    """Every lifecycle test runs against both repository implementations."""
+    return Env(request.param, tmp_path)
 
 
 def created(env: Env, seed: int = 1):
@@ -108,7 +123,7 @@ def test_create_revision_one_valid_and_readable(env: Env) -> None:
     assert plan["plan_id"] == "plan_2026_10_26" and plan["revision"] == 1
     validate_snapshot(plan, rev.snapshot.shopping_list, set(rev.pantry))
     assert rev.pantry == tuple(INPUTS.pantry) and rev.input_basis.startswith("sha256:")
-    read = PlanReadService(InMemoryPlanReadAdapter(env.repo))
+    read = PlanReadService(env.read_adapter)
     assert read.get_plan(plan["plan_id"])["snapshot_id"] == plan["snapshot_id"]
     listed = read.list_plans(FUTURE, FUTURE)["items"]
     assert [i["plan_id"] for i in listed] == [plan["plan_id"]]
@@ -138,7 +153,7 @@ def test_reads_never_run_solver(env: Env) -> None:
     calls = env.solver.count
     env.svc.get_current(rev.plan_id)
     env.svc.get_plan_for_week(FUTURE)
-    PlanReadService(InMemoryPlanReadAdapter(env.repo)).get_plan(rev.plan_id)
+    PlanReadService(env.read_adapter).get_plan(rev.plan_id)
     assert env.solver.count == calls
 
 
@@ -189,7 +204,7 @@ def test_solver_failure_creates_no_proposal_or_revision(env: Env) -> None:
     env.solver.fail = True
     with pytest.raises(GenerationFailed):
         env.svc.propose_regeneration(rev.plan_id, 1, seed=2)
-    assert env.repo._proposals == {}
+    assert proposal_count(env.repo) == 0
     assert env.repo.get_plan(rev.plan_id).current_revision == 1
 
 
@@ -403,8 +418,9 @@ def test_snapshot_id_semantics(env: Env) -> None:
 # ---- real generation service end to end
 
 
-def test_real_generation_service_on_repo_inputs() -> None:
-    repo = InMemoryPlanRepository()
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+def test_real_generation_service_on_repo_inputs(kind: str, tmp_path: Path) -> None:
+    repo, adapter = make_repo(kind, tmp_path)
     clock = Clock()
     svc = PlanWorkflowService(repo, Reader(), clock)  # default generator = generate()
     rev = svc.create_plan(FUTURE, seed=42)
@@ -413,5 +429,5 @@ def test_real_generation_service_on_repo_inputs() -> None:
     res = svc.accept_proposal(rev.plan_id, p.proposal_id, 1, "k1")
     expected = 2 if p.changes else 1
     assert res.revision == expected
-    read = PlanReadService(InMemoryPlanReadAdapter(repo))
+    read = PlanReadService(adapter)
     assert read.get_plan(rev.plan_id)["revision"] == expected
