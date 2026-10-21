@@ -77,19 +77,45 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
   );
 }
 
-// Bottom bar shown in the month view while weeks are ticked.
+// Bottom bar shown in the month view while weeks are ticked: start a new list or add the weeks to an open one.
 export function CreateTripBar({ planIds, reader, onClear, onCreated, onProblem }) {
   const [name, setName] = useState('');
+  const [target, setTarget] = useState('');
+  const [openTrips, setOpenTrips] = useState([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  if (!planIds.length) return null;
+  const active = planIds.length > 0;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    reader.listShoppingTrips().then(result => { if (live) setOpenTrips(result.items.filter(trip => trip.status === 'open')); }).catch(() => { if (live) setOpenTrips([]); });
+    return () => { live = false; };
+  }, [active, reader]);
+
+  if (!active) return null;
+  const chosen = openTrips.find(trip => trip.trip_id === target);
+  const finish = outcome => {
+    setMessage(outcome.message);
+    if (outcome.code === 'week_already_on_trip' || outcome.code === 'plan_not_found') onProblem?.();
+  };
   const create = async () => {
     setBusy(true); setMessage('');
     const outcome = await runTripAction(() => getEditor().createTrip(planIds, name), { reader });
     setBusy(false);
     if (outcome.trip) { setName(''); onCreated(outcome.trip); return; }
-    setMessage(outcome.message);
-    if (outcome.code === 'week_already_on_trip' || outcome.code === 'plan_not_found') onProblem?.();
+    finish(outcome);
+  };
+  // Adds the weeks one at a time, carrying the version each add returns; stops at the first problem.
+  const addToTrip = async () => {
+    setBusy(true); setMessage('');
+    let trip = chosen;
+    for (const planId of planIds) {
+      const outcome = await runTripAction(() => getEditor().addTripWeek(trip.trip_id, planId, trip.version), { reader, tripId: trip.trip_id });
+      if (!outcome.trip || outcome.message) { setBusy(false); finish(outcome); return; }
+      trip = outcome.trip;
+    }
+    setBusy(false); setTarget(''); onCreated(trip);
   };
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-lg p-3" data-testid="create-trip-bar">
@@ -97,8 +123,16 @@ export function CreateTripBar({ planIds, reader, onClear, onCreated, onProblem }
         <Message message={message} onDismiss={() => setMessage('')} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{planIds.length} {planIds.length === 1 ? 'week' : 'weeks'} selected</span>
-          <input aria-label="Shopping list name" value={name} maxLength={80} onChange={event => setName(event.target.value)} placeholder="Name (optional)" className="min-h-11 flex-1 min-w-[10rem] px-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm" />
-          <button className={btnPrimary} disabled={busy} onClick={create}>Create shopping list</button>
+          <select aria-label="Shopping list for the selected weeks" value={target} onChange={event => setTarget(event.target.value)} className="min-h-11 min-w-0 px-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm">
+            <option value="">New shopping list</option>
+            {openTrips.map(trip => <option key={trip.trip_id} value={trip.trip_id}>Add to: {trip.name}</option>)}
+          </select>
+          {chosen
+            ? <button className={btnPrimary} disabled={busy} onClick={addToTrip}>Add to list</button>
+            : <>
+                <input aria-label="Shopping list name" value={name} maxLength={80} onChange={event => setName(event.target.value)} placeholder="Name (optional)" className="min-h-11 flex-1 min-w-[10rem] px-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm" />
+                <button className={btnPrimary} disabled={busy} onClick={create}>Create shopping list</button>
+              </>}
           <button className={btnQuiet} disabled={busy} onClick={onClear}>Clear</button>
         </div>
       </div>
