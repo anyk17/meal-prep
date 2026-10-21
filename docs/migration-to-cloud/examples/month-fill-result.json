@@ -1,0 +1,34 @@
+{
+  "month": "2026-10",
+  "weeks": [
+    {
+      "week_start": "2026-09-28",
+      "week_end": "2026-10-04",
+      "status": "skipped_past"
+    },
+    {
+      "week_start": "2026-10-05",
+      "week_end": "2026-10-11",
+      "status": "skipped_past"
+    },
+    {
+      "week_start": "2026-10-12",
+      "week_end": "2026-10-18",
+      "status": "skipped_past"
+    },
+    {
+      "week_start": "2026-10-19",
+      "week_end": "2026-10-25",
+      "status": "exists",
+      "plan_id": "plan_2026_10_19",
+      "revision": 2
+    },
+    {
+      "week_start": "2026-10-26",
+      "week_end": "2026-11-01",
+      "status": "created",
+      "plan_id": "plan_2026_10_26",
+      "revision": 1
+    }
+  ]
+}

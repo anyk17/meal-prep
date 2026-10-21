@@ -42,7 +42,10 @@ EXPECTED_PATHS = {
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept": {"post"},
     "/api/v1/plans/{plan_id}/undo": {"post"},
     "/api/v1/capabilities": {"get"},
+    "/api/v1/months/{month}/fill": {"post"},
 }
+# POST operations whose body is an empty object (the identifier is in the path).
+EMPTY_BODY_PATHS = {"/api/v1/months/{month}/fill"}
 # Mutations that must carry a required Idempotency-Key header.
 IDEMPOTENT_PATHS = {
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept",
@@ -261,9 +264,13 @@ def check_contract(spec, checks):
                     spec,
                     body.get("content", {}).get("application/json", {}).get("schema", {}),
                 )
+                has_fields = (
+                    body_schema.get("maxProperties") == 0
+                    if path in EMPTY_BODY_PATHS
+                    else bool(body_schema.get("required"))
+                )
                 checks.require(
-                    body_schema.get("additionalProperties") is False
-                    and bool(body_schema.get("required")),
+                    body_schema.get("additionalProperties") is False and has_fields,
                     f"{method.upper()} {path}: request body schema must forbid unknown fields and require fields",
                 )
             if method.lower() != "get":
@@ -735,6 +742,12 @@ def self_test_contract(spec):
         "missing rule_violation example": lambda d: d["paths"]["/api/v1/plans"]["post"][
             "responses"
         ]["422"]["content"]["application/json"]["examples"].pop("ruleViolation"),
+        "open fill body": lambda d: d["components"]["schemas"]["FillMonthRequest"].__setitem__(
+            "additionalProperties", True
+        ),
+        "missing fill 403": lambda d: d["paths"]["/api/v1/months/{month}/fill"]["post"][
+            "responses"
+        ].pop("403"),
         "missing 403": lambda d: d["paths"]["/api/v1/plans/{plan_id}/undo"]["post"][
             "responses"
         ].pop("403"),

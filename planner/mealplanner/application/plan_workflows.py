@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ..domain.month import MonthFillResult, WeekFillOutcome, parse_month, week_seed, weeks_of_month
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.snapshot import PlanSnapshot, normalize_snapshot
 from ..domain.weekly_rules import check_weekly_rules
@@ -29,9 +30,11 @@ from ..domain.weekly_plan import (
     ProposalNotFound,
     RetryIdReused,
     RetryRecord,
+    RuleViolationError,
     StaleRevision,
     WeeklyPlan,
     WeekNotEditable,
+    WorkflowError,
     check_linked_pairs,
     content_equal,
     diff_snapshots,
@@ -49,6 +52,14 @@ logger = logging.getLogger(__name__)
 Clock = Callable[[], datetime]  # must return a timezone-aware datetime
 
 DEFAULT_PROPOSAL_TTL = timedelta(minutes=30)
+
+# Error codes recorded for a week that failed during fill_month (same codes as the HTTP API).
+FILL_ERROR_CODES: tuple[tuple[type[Exception], str], ...] = (
+    (RuleViolationError, "rule_violation"),
+    (GenerationFailed, "generation_failed"),
+    (WeekNotEditable, "week_not_editable"),
+    (InvalidWeek, "invalid_week"),
+)
 
 
 class PlanWorkflowService:
@@ -130,6 +141,48 @@ class PlanWorkflowService:
                 WeeklyPlan(plan_id, week_start, self._timezone, 1), revision
             )  # raises DuplicateWeek on a race
         return revision
+
+    # ------------------------------------------------------------ fill month
+
+    def fill_month(self, month: str) -> MonthFillResult:
+        """Create the missing weekly plans for every week overlapping `month`.
+
+        A batch of independent create_plan calls: no monthly or cross-week rules. Past
+        weeks are skipped, existing weeks are never overwritten or regenerated, and a
+        failing week is recorded without stopping the rest. Each created week commits
+        on its own with seed `week_seed(week_start)`.
+        """
+        try:
+            parse_month(month)
+            starts = weeks_of_month(month)
+        except (ValueError, OverflowError) as exc:
+            raise InvalidRequest("month must be a valid YYYY-MM") from exc
+        outcomes = [self._fill_week(start) for start in starts]
+        return MonthFillResult(month, tuple(outcomes))
+
+    def _fill_week(self, week_start: date) -> WeekFillOutcome:
+        week_end = week_start + timedelta(days=6)
+
+        def outcome(status: str, **fields) -> WeekFillOutcome:
+            return WeekFillOutcome(week_start, week_end, status, **fields)
+
+        def existing() -> WeekFillOutcome:
+            plan = self._repo.get_plan_by_week(week_start)
+            assert plan is not None
+            return outcome("exists", plan_id=plan.plan_id, revision=plan.current_revision)
+
+        if week_end < self._today():
+            return outcome("skipped_past")
+        if self._repo.get_plan_by_week(week_start) is not None:
+            return existing()
+        try:
+            revision = self.create_plan(week_start, seed=week_seed(week_start))
+        except DuplicateWeek:  # lost a race with another writer: the week now exists
+            return existing()
+        except WorkflowError as exc:
+            code = next((c for cls, c in FILL_ERROR_CODES if isinstance(exc, cls)), "generation_failed")
+            return outcome("failed", error_code=code, error_message=str(exc) or code)
+        return outcome("created", plan_id=revision.plan_id, revision=revision.revision)
 
     # ------------------------------------------------------------ propose / discard
 

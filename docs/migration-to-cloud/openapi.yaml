@@ -736,6 +736,94 @@ paths:
         '404':
           $ref: '#/components/responses/PlanNotFound'
 
+  /api/v1/months/{month}/fill:
+    post:
+      tags: [Plans]
+      operationId: fillMonth
+      summary: Create the missing weekly plans for a month
+      description: |-
+        Batch of independent weekly plans; there are no monthly or cross-week rules.
+        Covers every Monday-Sunday week overlapping the month (4 to 6 weeks, including
+        weeks crossing either boundary), in order. Weeks that already ended are
+        skipped_past; weeks that already have a plan are reported as exists and are
+        never overwritten or regenerated; every other week is created as revision 1
+        with a seed derived deterministically from its Monday (int(YYYYMMDD) mod 2^31).
+        Each created week commits independently, so a failed week (status failed with an
+        error code and message) does not stop or undo the others. Solves run
+        sequentially and the whole fill holds one generation slot (503 generation_busy
+        when busy). The call can take as long as one solve per created week. Requires a
+        SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/Month'
+      requestBody:
+        required: true
+        description: An empty JSON object.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FillMonthRequest'
+      responses:
+        '200':
+          description: One outcome per week, in week order.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthFillResult'
+              examples:
+                filled:
+                  summary: Past weeks skipped, an existing week kept, one week created
+                  externalValue: examples/month-fill-result.json
+                partial:
+                  summary: One week failed; the others were still created
+                  externalValue: examples/month-fill-result-partial.json
+        '400':
+          description: Malformed month, malformed JSON body, or unknown body field.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidMonth:
+                  summary: month is not YYYY-MM
+                  externalValue: examples/error-invalid-month.json
+                unknownField:
+                  summary: Invalid or unknown body field
+                  externalValue: examples/error-invalid-body.json
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '503':
+          description: Generation is busy (Retry-After given) or the database is unavailable.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationBusy:
+                  summary: Solver concurrency bound reached
+                  externalValue: examples/error-generation-busy.json
+
   /api/v1/capabilities:
     get:
       tags: [Capabilities]
@@ -765,6 +853,15 @@ paths:
                   externalValue: examples/capabilities.json
 components:
   parameters:
+    Month:
+      name: month
+      in: path
+      required: true
+      description: Calendar month as YYYY-MM.
+      schema:
+        type: string
+        pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+      example: '2026-10'
     PlanId:
       name: plan_id
       in: path
@@ -1162,6 +1259,61 @@ components:
         can_edit_plans:
           type: boolean
           description: True only for a loopback client of a SQLite-backed API.
+    FillMonthRequest:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+      description: Empty object; the month comes from the path.
+    WeekFillOutcome:
+      type: object
+      additionalProperties: false
+      required: [week_start, week_end, status]
+      properties:
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [created, exists, skipped_past, failed]
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          description: Present for created and exists.
+        revision:
+          type: integer
+          minimum: 1
+          description: Present for created (always 1) and exists (the current revision, never changed by a fill).
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          description: Present only for failed.
+          properties:
+            code:
+              type: string
+              enum: [generation_failed, rule_violation, week_not_editable, invalid_week]
+            message:
+              type: string
+    MonthFillResult:
+      type: object
+      additionalProperties: false
+      required: [month, weeks]
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        weeks:
+          type: array
+          minItems: 4
+          maxItems: 6
+          description: Every Monday-Sunday week overlapping the month, in order.
+          items:
+            $ref: '#/components/schemas/WeekFillOutcome'
     CreatePlanRequest:
       type: object
       additionalProperties: false

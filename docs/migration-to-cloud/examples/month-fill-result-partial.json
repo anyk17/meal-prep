@@ -1,0 +1,49 @@
+{
+  "month": "2026-11",
+  "weeks": [
+    {
+      "week_start": "2026-10-26",
+      "week_end": "2026-11-01",
+      "status": "exists",
+      "plan_id": "plan_2026_10_26",
+      "revision": 1
+    },
+    {
+      "week_start": "2026-11-02",
+      "week_end": "2026-11-08",
+      "status": "created",
+      "plan_id": "plan_2026_11_02",
+      "revision": 1
+    },
+    {
+      "week_start": "2026-11-09",
+      "week_end": "2026-11-15",
+      "status": "failed",
+      "error": {
+        "code": "generation_failed",
+        "message": "plan generation failed: no feasible plan"
+      }
+    },
+    {
+      "week_start": "2026-11-16",
+      "week_end": "2026-11-22",
+      "status": "created",
+      "plan_id": "plan_2026_11_16",
+      "revision": 1
+    },
+    {
+      "week_start": "2026-11-23",
+      "week_end": "2026-11-29",
+      "status": "created",
+      "plan_id": "plan_2026_11_23",
+      "revision": 1
+    },
+    {
+      "week_start": "2026-11-30",
+      "week_end": "2026-12-06",
+      "status": "created",
+      "plan_id": "plan_2026_11_30",
+      "revision": 1
+    }
+  ]
+}

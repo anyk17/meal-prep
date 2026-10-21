@@ -15,6 +15,7 @@ from typing import Any
 
 from ...application.errors import InvalidRequest, PlanNotFound
 from ...application.plan_workflows import PlanWorkflowService
+from ...domain.month import MONTH_PATTERN, MonthFillResult
 from ...domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
@@ -145,6 +146,23 @@ def serialize_result(r: MutationResult) -> dict[str, Any]:
         "changed": r.changed,
         "replayed": r.replayed,
     }
+
+
+def serialize_month_fill(r: MonthFillResult) -> dict[str, Any]:
+    weeks = []
+    for w in r.weeks:
+        item: dict[str, Any] = {
+            "week_start": w.week_start.isoformat(),
+            "week_end": w.week_end.isoformat(),
+            "status": w.status,
+        }
+        if w.plan_id is not None:
+            item["plan_id"] = w.plan_id
+            item["revision"] = w.revision
+        if w.error_code is not None:
+            item["error"] = {"code": w.error_code, "message": w.error_message}
+        weeks.append(item)
+    return {"month": r.month, "weeks": weeks}
 
 
 def register_write_routes(
@@ -284,6 +302,23 @@ def register_write_routes(
             response.status_code = 201
             response.headers["Location"] = f"/api/v1/plans/{revision.plan_id}"
             return response
+
+        return mapped(run)
+
+    @app.post("/api/v1/months/<month>/fill")
+    def fill_month(month: str):
+        denied = guard()
+        if denied:
+            return denied
+
+        def run():
+            if not MONTH_PATTERN.fullmatch(month):
+                raise BodyError("month", "month must be YYYY-MM")
+            _parse_body(set())  # empty object only
+            result = generating(lambda: service().fill_month(month))
+            if not isinstance(result, MonthFillResult):
+                return result
+            return jsonify(serialize_month_fill(result))
 
         return mapped(run)
 

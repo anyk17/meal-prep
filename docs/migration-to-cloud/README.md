@@ -72,7 +72,7 @@ Append the revision and move the plan's current-revision pointer in one database
 
 Derive saved grocery totals from the accepted assignment snapshots and their captured pantry context, never from the latest mutable catalog or pantry on each read or publication. Pantry changes apply to subsequent calculations; refreshing groceries for an already accepted plan requires a separately specified workflow. A seed alone cannot reconstruct an accepted plan: preserve its actual assignments and calculation context.
 
-A month is a view over current weekly plans, not another aggregate or solver horizon. Fetch every plan whose Monday–Sunday week overlaps the selected month, including a week crossing a month boundary. Keep weekly rules scoped to their week; decide explicitly before adding cross-week adjacency constraints. If the manifest has no entry for a month, the public site says “No published plan.” It does not claim that the month is unplanned on the private NAS.
+A month is a view over current weekly plans, not another aggregate or solver horizon. Fetch every plan whose Monday–Sunday week overlaps the selected month, including a week crossing a month boundary. Weekly rules stay scoped to their week; there are no cross-week rules (decided). If the manifest has no entry for a month, the public site says “No published plan.” It does not claim that the month is unplanned on the private NAS.
 
 ## Identifiers and version meanings
 
@@ -313,6 +313,8 @@ cd /home/julopez/dev/meal-prep
 MEALPLANNER_DB=var/mealplanner.db .venv/bin/python -m mealplanner.entrypoints.http.app
 ```
 
+`POST /api/v1/months/YYYY-MM/fill` (body `{}`) creates the missing weekly plans for every week overlapping that month, one independent plan per week; it skips past weeks, never overwrites existing ones, and reports per-week `created | exists | skipped_past | failed`.
+
 Then start the frontend as above (`npm run dev:api` in `site/`). `GET /api/v1/capabilities` reports `can_edit_plans`, which is true only for loopback clients of a SQLite-backed API. Without `MEALPLANNER_DB` the API serves the JSON snapshot and rejects writes with `403 read_only`; non-loopback writes get `403 forbidden`. Optional settings: `MEALPLANNER_TIMEZONE` (default `America/Bogota`, also the clock for "future week" checks), `MEALPLANNER_SOLVER_TIMEOUT_SECONDS` (default 30) and `MEALPLANNER_MAX_CONCURRENT_GENERATIONS` (default 1; extra requests get `503 generation_busy` with `Retry-After`).
 
 Open `http://127.0.0.1:5174/meal-prep/`. This uses the checked-in populated publication bundle, not newly generated CLI files. `VITE_STATIC_BUNDLE=empty npm run dev:static -- --port 5174` exercises the empty publication. Neither mode offers generation, persisted edits, or swaps yet; grocery checkmarks remain browser-local.
@@ -373,6 +375,7 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Static publication | Manual month selection; immutable bundle; retain latest three successful publications | implement in phase 6 |
 | Static checkmarks | Device-local and never exported/written back | phase 2 |
 | Home checkmarks | Browser-local first; shared DB state in phase 4 | phase 4 |
-| Cross-week rules | No new adjacency rule assumed | phase 4 |
+| Cross-week rules | None (decided) | — |
+| Month generation | Batch of independent weekly plans; no monthly or cross-week rules; existing weeks never overwritten | — |
 | Replacement | Preserve unrelated meals; explain infeasibility; candidates must satisfy `domain/weekly_rules.py` (same specifications as generation, solver-independent) | phase 5 |
 | Costs | Verify NAS, power, storage, GitHub plan, domain, transfer, and tooling at launch | before phase 6 |
