@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phases 1–4 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Phase 5 (flexible meal swaps) is in progress; phase 6 (NAS operation, household login, automated publishing) follows.
+**Status:** Phases 1–5 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Home users can also swap any today-or-later meal to any catalog recipe (rules are advisory for swaps). Next: phase 6 (NAS operation, household login, automated publishing).
 
 ## Starting point and first milestone
 
@@ -233,7 +233,7 @@ Keep weekly shopping totals per week. A trip's items are a plain sum of its week
 
 **Exit:** month and year boundaries work in API and static mode, including weeks crossing month boundaries. Home users create a trip from several weeks, see what to buy, mark it done, and see those weeks as covered after reload; a week cannot be on two trips; stale trip edits are rejected. An exported bundle validates, shows the published trips on the static site, and a failed export leaves the previous `index.json` active.
 
-### Phase 5 — Flexible meal swaps
+### Phase 5 — Flexible meal swaps (complete)
 
 “Swap” replaces the recipe/variant in one dated slot with any catalog recipe/variant. Exchanging two scheduled meals is a separate future action. The household decides; weekly rules are **advisory for swaps** (decided).
 
