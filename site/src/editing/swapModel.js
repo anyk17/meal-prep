@@ -18,6 +18,29 @@ export function filterVariants(variants, query = '', protein = null) {
   });
 }
 
+const CARB_NAMES = { platano_maduro: 'Plátano maduro', platano_verde: 'Plátano verde' };
+export function carbLabel(carb) {
+  if (!carb) return 'No carb';
+  const name = CARB_NAMES[carb] ?? carb.replace(/_/g, ' ');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+// One entry per recipe, its carb variants with "No carb" first, in catalog order otherwise.
+export function groupRecipes(variants) {
+  const recipes = new Map();
+  for (const item of variants) {
+    if (!recipes.has(item.recipe_id)) recipes.set(item.recipe_id, { recipe_id: item.recipe_id, name: item.name, protein: item.protein, variants: [] });
+    recipes.get(item.recipe_id).variants.push(item);
+  }
+  for (const recipe of recipes.values()) recipe.variants.sort((a, b) => (a.carb ? 1 : 0) - (b.carb ? 1 : 0));
+  return [...recipes.values()];
+}
+
+// Keep the slot's current carb when the new recipe offers it, else start with no carb.
+export function defaultVariant(recipe, currentCarb) {
+  return recipe.variants.find(item => (item.carb ?? null) === (currentCarb ?? null)) ?? recipe.variants[0];
+}
+
 export function canSwapSlot(slot, today) {
   return !!slot && typeof slot.date === 'string' && typeof today === 'string' && slot.date >= today;
 }

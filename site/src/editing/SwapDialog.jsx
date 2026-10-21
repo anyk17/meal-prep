@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, Check, ArrowRight, TriangleAlert } from 'lucide-react';
 import { createPlanEditor } from './planEditor.js';
-import { filterVariants, proteinOptions, isLinked, SCOPE_LABELS, groupGroceryDelta, tripImpactMessage, SWAP_WARNING_TITLE, swapErrorMessage, swapNeedsReload } from './swapModel.js';
+import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, isLinked, SCOPE_LABELS, groupGroceryDelta, tripImpactMessage, SWAP_WARNING_TITLE, swapErrorMessage, swapNeedsReload } from './swapModel.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE_PATH || '/api/v1';
 const btn = 'min-h-11 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
@@ -19,6 +19,7 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
   const [query, setQuery] = useState('');
   const [protein, setProtein] = useState(null);
   const [scope, setScope] = useState('pair');
+  const [recipe, setRecipe] = useState(null);
   const [chosen, setChosen] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(null);
@@ -49,13 +50,13 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
       if (mine === generation.current) setPreview(result);
     } catch (err) {
       if (mine !== generation.current) return;
-      setProblem(swapErrorMessage(err)); setChosen(null);
+      setProblem(swapErrorMessage(err));
       if (swapNeedsReload(err)) void onReload();
     } finally { if (mine === generation.current) setBusy(null); }
   };
 
   const changeScope = next => { setScope(next); if (chosen) void loadPreview(chosen, next); };
-  const back = () => { generation.current += 1; setChosen(null); setPreview(null); setProblem(null); setBusy(null); };
+  const back = () => { generation.current += 1; setRecipe(null); setChosen(null); setPreview(null); setProblem(null); setBusy(null); };
 
   const confirm = async () => {
     if (!chosen || !preview || busy) return;
@@ -69,7 +70,13 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
     } finally { setBusy(null); }
   };
 
-  const shown = useMemo(() => variants ? filterVariants(variants, query, protein) : [], [variants, query, protein]);
+  const current = useMemo(() => variants?.find(item => item.variant_id === slot.variant_id) ?? null, [variants, slot.variant_id]);
+  const shown = useMemo(() => {
+    if (!variants) return [];
+    const matching = new Set(filterVariants(variants, query, protein).map(item => item.recipe_id));
+    return groupRecipes(variants).filter(item => matching.has(item.recipe_id));
+  }, [variants, query, protein]);
+  const pickRecipe = item => { setRecipe(item); void loadPreview(defaultVariant(item, current?.carb), scope); };
   const groups = preview ? groupGroceryDelta(preview.grocery_delta) : [];
   const impact = preview ? tripImpactMessage(preview.trip) : null;
 
@@ -99,7 +106,7 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
 
           {problem && <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-800 dark:text-red-200 px-3 py-2 text-sm">{problem}</div>}
 
-          {!chosen && (
+          {!recipe && (
             <>
               <div className="relative">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -118,15 +125,15 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
               {variants && shown.length === 0 && <p className="text-sm text-slate-500">No recipes match.</p>}
               <ul className="divide-y divide-slate-100 dark:divide-slate-800" aria-label="Recipes">
                 {shown.map(item => {
-                  const current = item.variant_id === slot.variant_id;
+                  const isCurrent = item.recipe_id === current?.recipe_id;
                   return (
-                    <li key={item.variant_id}>
-                      <button disabled={busy !== null} onClick={() => loadPreview(item, scope)} className="w-full min-h-14 py-2 px-1 text-left flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 disabled:opacity-60">
+                    <li key={item.recipe_id}>
+                      <button disabled={busy !== null} onClick={() => pickRecipe(item)} className="w-full min-h-14 py-2 px-1 text-left flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 disabled:opacity-60">
                         <span className="flex-1 min-w-0">
                           <span className="block font-medium text-slate-900 dark:text-white">{item.name}</span>
-                          <span className="block text-xs text-slate-500 dark:text-slate-400 capitalize">{item.protein}{item.carb ? ` · ${item.carb}` : ''}</span>
+                          <span className="block text-xs text-slate-500 dark:text-slate-400"><span className="capitalize">{item.protein}</span> · {item.variants.length === 1 ? carbLabel(item.variants[0].carb) : `${item.variants.length} carb options`}</span>
                         </span>
-                        {current && <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 inline-flex items-center gap-1"><Check size={14} />Current</span>}
+                        {isCurrent && <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 inline-flex items-center gap-1"><Check size={14} />Current</span>}
                       </button>
                     </li>
                   );
@@ -135,9 +142,23 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
             </>
           )}
 
-          {chosen && (
+          {recipe && (
             <section aria-label="Swap preview" className="space-y-4 text-sm">
-              <p className="font-semibold text-slate-800 dark:text-slate-100">New recipe: {chosen.name}</p>
+              <p className="font-semibold text-slate-800 dark:text-slate-100">New recipe: {recipe.name}</p>
+              {recipe.variants.length > 1 && (
+                <div role="radiogroup" aria-label="Carb" className="flex flex-wrap gap-2">
+                  {recipe.variants.map(item => {
+                    const selected = item.variant_id === chosen?.variant_id;
+                    return (
+                      <button key={item.variant_id} role="radio" aria-checked={selected} disabled={busy === 'apply'}
+                        onClick={() => { if (!selected) void loadPreview(item, scope); }}
+                        className={`min-h-11 px-3 rounded-full text-sm border ${selected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
+                        {carbLabel(item.carb)}{item.variant_id === slot.variant_id ? ' (current)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {busy === 'preview' && <p role="status" className="text-slate-500">Checking the effect on this week…</p>}
               {preview && (
                 <>
@@ -191,9 +212,9 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
         </div>
 
         <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex gap-2 justify-end">
-          {chosen && <button className={btnQuiet} disabled={busy === 'apply'} onClick={back}>Back</button>}
+          {recipe && <button className={btnQuiet} disabled={busy === 'apply'} onClick={back}>Back</button>}
           <button className={btnQuiet} disabled={busy === 'apply'} onClick={onClose}>Cancel</button>
-          {chosen && <button className={btnPrimary} disabled={!preview || busy !== null} onClick={confirm}>{busy === 'apply' ? 'Swapping…' : 'Swap'}</button>}
+          {recipe && <button className={btnPrimary} disabled={!preview || busy !== null} onClick={confirm}>{busy === 'apply' ? 'Swapping…' : 'Swap'}</button>}
         </div>
       </div>
     </div>

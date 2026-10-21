@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPlanEditor } from '../src/editing/planEditor.js';
-import { filterVariants, proteinOptions, canSwapSlot, groupGroceryDelta, formatDifference, tripImpactMessage, replacedSwapsWarning, swapErrorMessage, swapNeedsReload } from '../src/editing/swapModel.js';
+import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, canSwapSlot, groupGroceryDelta, formatDifference, tripImpactMessage, replacedSwapsWarning, swapErrorMessage, swapNeedsReload } from '../src/editing/swapModel.js';
 
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 function mockFetch(handler) {
@@ -130,4 +130,24 @@ test('swap error messages', () => {
   assert.equal(swapErrorMessage({ code: 'other', message: 'boom' }), 'boom');
   assert.equal(swapNeedsReload({ code: 'stale_revision' }), true);
   assert.equal(swapNeedsReload({ code: 'variant_not_found' }), false);
+});
+
+test('groupRecipes lists each recipe once with no-carb first', () => {
+  const items = [
+    { variant_id: 's_rice', recipe_id: 's', name: 'Salmón', protein: 'fish', carb: 'rice' },
+    { variant_id: 'p_none', recipe_id: 'p', name: 'Pollo', protein: 'chicken', carb: null },
+    { variant_id: 's_none', recipe_id: 's', name: 'Salmón', protein: 'fish', carb: null },
+  ];
+  const recipes = groupRecipes(items);
+  assert.deepEqual(recipes.map(r => r.recipe_id), ['s', 'p']);
+  assert.deepEqual(recipes[0].variants.map(v => v.variant_id), ['s_none', 's_rice']);
+  assert.equal(defaultVariant(recipes[0], 'rice').variant_id, 's_rice');
+  assert.equal(defaultVariant(recipes[0], 'yuca').variant_id, 's_none');
+  assert.equal(defaultVariant(recipes[0], null).variant_id, 's_none');
+});
+
+test('carbLabel is readable', () => {
+  assert.equal(carbLabel(null), 'No carb');
+  assert.equal(carbLabel('platano_maduro'), 'Plátano maduro');
+  assert.equal(carbLabel('rice'), 'Rice');
 });
