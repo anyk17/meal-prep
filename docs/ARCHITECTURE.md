@@ -58,6 +58,7 @@ flowchart LR
 - **Plan generation**: the `PlanGenerator` port in `application/ports.py`; the OR-Tools encoding of the rules (`model.py`, `solve.py`) and `OrToolsPlanGenerator` live in `adapters/ortools/`. Entrypoints inject the generator (`create_app(generator=...)`, CLI); the engine only proposes, the domain rules decide.
 - **Planner inputs**: `domain/planner_inputs.py` (value object); read through the `PlannerInputReader` port by `adapters/yaml_inputs.py` or `adapters/sqlite/store.py`.
 - **Read / write HTTP**: `entrypoints/http/read_routes.py` and `write_routes.py` only parse, map errors and serialize; rules live in `application/plan_reads.py` and `plan_workflows.py`. `app.py` is the factory (`create_app`) and dev server (`python -m mealplanner.entrypoints.http.app`).
+- **Container wiring** (phase 6a): `entrypoints/http/ops_routes.py` (`/healthz`, and same-origin serving of the built frontend when `MEALPLANNER_STATIC_DIR` is set); `create_app(trust_network_peers=...)` / `MEALPLANNER_TRUST_NETWORK_PEERS` for the container's port-mapping-only access control (temporary until login); `Dockerfile`, `deploy/entrypoint.sh` (create-or-migrate, then gunicorn) and `deploy/docker-compose*.yml` at the repository level.
 - **CLIs**: `python -m mealplanner.entrypoints.cli` (also the `mealplanner` script) and `python -m mealplanner.entrypoints.db_cli` (import, backup, restore, export).
 
 ## Where do I put new code?

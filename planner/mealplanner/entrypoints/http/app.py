@@ -20,6 +20,7 @@ from ...adapters.json_snapshot import JsonPlanReadRepository, SourceUnavailableE
 from ...application.plan_reads import PlanReadService
 from ...application.ports import PlanGenerator, PlanReadRepository
 from ...domain.snapshot import SourceInvalidError
+from .ops_routes import register_health_route, register_static_routes
 from .read_routes import register_read_routes
 from .trip_routes import register_trip_routes
 from .write_routes import GenerationGate, register_write_routes
@@ -142,6 +143,8 @@ def create_app(
     solver_timeout_seconds: float | None = None,
     max_concurrent_generations: int | None = None,
     proposal_ttl: timedelta | None = None,
+    static_dir: Path | str | None = None,
+    trust_network_peers: bool | None = None,
 ) -> Any:
     """Create the API. Source files are loaded and validated once.
 
@@ -149,6 +152,11 @@ def create_app(
     plan write routes are enabled (loopback clients only). Otherwise the API is
     read-only. clock must return a timezone-aware datetime (tests inject one);
     the default reads the household timezone (MEALPLANNER_TIMEZONE).
+
+    static_dir (or MEALPLANNER_STATIC_DIR) also serves the built frontend from the same origin.
+    trust_network_peers (or MEALPLANNER_TRUST_NETWORK_PEERS=1) treats every TCP peer as local;
+    it exists for the container, where the published port (bound to loopback by Compose) is the
+    only access control. Remove it when household login (phase 6c) lands.
     """
     try:
         from flask import Flask, jsonify, request
@@ -206,11 +214,17 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    if trust_network_peers is None:
+        trust_network_peers = os.environ.get("MEALPLANNER_TRUST_NETWORK_PEERS") == "1"
+
+    def is_local_request() -> bool:
+        return trust_network_peers or _is_loopback_request()
+
     @app.before_request
     def reject_non_loopback_api_clients():
         if not request.path.startswith("/api/"):
             return None
-        if not _is_loopback_request():
+        if not is_local_request():
             if request.method not in ("GET", "HEAD", "OPTIONS"):
                 return _error(403, "forbidden", "Plan changes are allowed from this machine only.")
             return _error(
@@ -223,10 +237,14 @@ def create_app(
     )
     gate = GenerationGate(limit)
     app.config["GENERATION_GATE"] = gate
-    register_write_routes(app, _error, _is_loopback_request, gate)
+    register_write_routes(app, _error, is_local_request, gate)
 
     register_read_routes(app, _error)
-    register_trip_routes(app, _error, _is_loopback_request)
+    register_trip_routes(app, _error, is_local_request)
+    register_health_route(app)
+    static_root = static_dir or os.environ.get("MEALPLANNER_STATIC_DIR")
+    if static_root:
+        register_static_routes(app, static_root)
 
     return app
 

@@ -18,6 +18,9 @@ api = [
     "flask>=3.1,<4",
     "jsonschema>=4.10,<5",
 ]
+server = [
+    "gunicorn>=23,<24",
+]
 dev = [
     "pytest>=7.0",
     "black>=23.0",

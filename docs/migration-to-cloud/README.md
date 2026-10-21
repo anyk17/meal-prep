@@ -346,6 +346,30 @@ The default view is explicitly October 19–25, 2026. To anchor API data to anot
 
 Check both modes for weekly cards, recipe details, statistics, theme, grocery checkmarks, and refresh. Stop Flask to check the API error state; static mode should continue working independently. A failed refresh should retain the last complete plan and grocery view. Checkmarks are scoped to mode and snapshot identity.
 
+### Run the container
+
+One image serves the API-mode frontend (at `/meal-prep/`, `/` redirects there) and the API from one origin, behind gunicorn. Static serving is enabled only when `MEALPLANNER_STATIC_DIR` is set (the image sets it); the Vite dev flow above is unchanged. `GET /healthz` is the liveness check (no database access). The image has no login yet, so Compose sets `MEALPLANNER_TRUST_NETWORK_PEERS=1`: every TCP peer counts as local (otherwise the loopback rule rejects Docker's bridge address) and the loopback-only port mapping is the access control. Phase 6c removes this switch.
+
+WSL (needs Docker; the user must be in the `docker` group):
+
+```sh
+cd /home/julopez/dev/meal-prep
+mkdir -p var/docker-data
+docker compose -f deploy/docker-compose.dev.yml up --build   # http://127.0.0.1:8080/
+docker compose -f deploy/docker-compose.dev.yml down
+```
+
+A fresh `/data` is created on first start (`db_cli import` loads the planner inputs shipped in the image, no plan data); later starts only run `db_cli migrate`. Changed recipe inputs in a newer image are not applied automatically; run `db_cli import --replace-inputs` deliberately. The container runs as uid 10001 with a read-only root filesystem, a tmpfs `/tmp`, no capabilities and one gunicorn worker (4 threads, 300 s timeout; override with `WEB_WORKERS`, `WEB_THREADS`, `WEB_TIMEOUT`). The dev Compose file runs as your uid (`DEV_UID`/`DEV_GID`) so the bind-mounted `var/docker-data` stays yours.
+
+NAS (UGOS Docker app):
+
+1. Over SSH, once: `mkdir -p /volume1/docker/meal-prep/data && chown 10001:10001 /volume1/docker/meal-prep/data`.
+2. After a push to `feature/cloud-migration`, the **Container image** workflow publishes `ghcr.io/jflopezo91/meal-prep` and prints the digest in its job summary. Verify it: `gh attestation verify --owner jflopezo91 oci://ghcr.io/jflopezo91/meal-prep@sha256:<digest>`.
+3. Put the digest in `deploy/docker-compose.yml` (`image:` line), then **Docker > Project > Create**, paste the file and start it. The port is bound to `127.0.0.1` until household login exists.
+4. Update: verify the new digest, replace it in the project, redeploy. Rollback: put the previous digest back and redeploy; the data volume is untouched, and `migrate` refuses a database newer than the image supports, so restore a backup (`db_cli backup`/`restore`) if a rollback crosses a schema change.
+
+The image also contains git, openssh-client and GitHub's SSH host keys (`deploy/github_known_hosts`, from `api.github.com/meta`) for the phase 6b push; refresh that file if GitHub rotates keys. Python dependencies are hash-locked in `planner/requirements.lock` (regenerate with `pip-compile --generate-hashes --strip-extras --extra api --extra server -o requirements.lock pyproject.toml` in `planner/`).
+
 ### Run Phase 4 (manual export) locally
 
 If the HTTP server answers `503 source_unavailable` for a SQLite database, the file is probably unmigrated (the API never migrates a database it only reads). Apply pending migrations to an existing database, then export:

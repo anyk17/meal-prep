@@ -1,0 +1,41 @@
+# Local (WSL) run: builds the image from this checkout and binds to 127.0.0.1 only.
+#   mkdir -p var/docker-data
+#   docker compose -f deploy/docker-compose.dev.yml up --build
+# Then open http://127.0.0.1:8080/. Data persists in var/docker-data (git-ignored).
+services:
+  meal-prep:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: meal-prep:dev
+    user: "${DEV_UID:-1000}:${DEV_GID:-1000}"  # must own var/docker-data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MEALPLANNER_TIMEZONE: America/Bogota
+      MEALPLANNER_TRUST_NETWORK_PEERS: "1"  # the loopback-only port mapping is the access control
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../var/docker-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # secrets:   # phase 6b, as in docker-compose.yml
+    #   - deploy_key
+
+# secrets:
+#   deploy_key:
+#     file: ../var/secrets/deploy_key
