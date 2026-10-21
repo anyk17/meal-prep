@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phases 1–3 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users can create, preview/accept/discard regeneration, undo, and fill a month (a batch of independent weekly plans) in API mode, while static mode stays read-only. Weekly rules are domain specifications checked on every saved plan; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Backend, frontend, contract checks, and a browser walkthrough (2026-10-21) pass. Phase 4 (month view, shared grocery checkmarks) is next.
+**Status:** Phases 1–3 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users can create, preview/accept/discard regeneration, undo, and fill a month (a batch of independent weekly plans) in API mode, while static mode stays read-only. Weekly rules are domain specifications checked on every saved plan; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Backend, frontend, contract checks, and a browser walkthrough (2026-10-21) pass. Phase 4 (month/year navigation, shopping trips that cover weeks, and a minimal manual exporter so the public site shows what to buy) is next.
 
 ## Starting point and first milestone
 
@@ -14,7 +14,7 @@ The first delivery milestone combines phases 1 and 2: preserve today's weekly vi
 
 Run the household's authoritative meal-planning app on a NAS inside the home network. The app uses Flask, SQLite, and one React frontend served from the same origin as its API. Household members use it on the home LAN with app authentication and server-side authorization. Only loopback development may bypass login. The NAS makes outbound requests to publish an explicitly selected, read-only calendar to a separate public GitHub Pages repository. There are no inbound public NAS ports, tunnels, or remote app sessions in this design. GitHub Pages never calls the NAS, runs the solver, receives app writes, or contains the authoritative database.
 
-The public site is intentionally public. Anyone with its URL can read the published plans and shopping totals. It contains only approved output. It does not contain the SQLite database, drafts or unaccepted proposals, revision history, planner inputs, pantry settings, household checkmarks, secrets, private app configuration, or credentials. Publication is a deliberate copy of selected current plans; saving a plan at home does not publish it.
+The public site is intentionally public. Anyone with its URL can read the published plans, weekly shopping totals, and published shopping trips (what to buy, and which weeks a trip covers). Reading a shopping trip away from home is a primary use of the public site. It contains only approved output. It does not contain the SQLite database, drafts or unaccepted proposals, revision history, planner inputs, pantry settings, household checkmarks, secrets, private app configuration, or credentials. Publication is a deliberate copy of selected current plans; saving a plan at home does not publish it.
 
 ```text
 Home LAN: browser → React in API mode → Flask → application/domain services
@@ -74,6 +74,15 @@ Derive saved grocery totals from the accepted assignment snapshots and their cap
 
 A month is a view over current weekly plans, not another aggregate or solver horizon. Fetch every plan whose Monday–Sunday week overlaps the selected month, including a week crossing a month boundary. Weekly rules stay scoped to their week; there are no cross-week rules (decided). If the manifest has no entry for a month, the public site says “No published plan.” It does not claim that the month is unplanned on the private NAS.
 
+A **ShoppingTrip** (shown to users as a “shopping list”) is a separate aggregate that answers “what do we buy to cover these weeks?” It holds a set of weekly plans, a status (`open` or `done`), and a `version` for optimistic concurrency. It never modifies a plan or creates a plan revision.
+
+- **Items** are the sum, per ingredient and unit, of each covered week's saved grocery rows. They are derived, not stored or edited. There is no pantry tracking beyond what each weekly grocery list already captured, and no record of what was actually bought.
+- **Open trip:** items are derived from each week's current revision. Weeks can be added and removed.
+- **Done** (“shopping done”): the trip records the revision of each week it covered, and its items are frozen to those revisions. A done trip can be reopened (back to `open`) or deleted to undo a mistake.
+- **Week coverage** is derived from trips, never stored on the plan: *not covered* (no trip), *on a list* (open trip), *covered* (done trip). A covered week whose current revision is newer than the covered revision shows a “changed since shopping” hint; there is no automatic top-up calculation.
+- **Invariant:** a week belongs to at most one trip, whatever its status. Removing a week from a done trip requires reopening it first.
+- Checkboxes on trip items are an in-store convenience only: device-local in both modes, never stored in SQLite, never exported, and never affect coverage.
+
 ## Identifiers and version meanings
 
 Keep three tokens separate:
@@ -123,6 +132,7 @@ publication/
     manifest.json
     plans/<plan_id>/plan.json
     plans/<plan_id>/shopping-list.json
+    shopping-trips/<trip_id>.json        # phase 4
 ```
 
 The index contains `schema_version`, `publication_id`, and `manifest_path`, exactly `publications/<publication_id>/manifest.json` relative to the index. The manifest contains `schema_version`, the same `publication_id`, `exported_at`, sorted unique `selected_months` in `YYYY-MM` form, one household IANA `timezone`, and `plans`. Each entry contains `summary`, `plan_path`, and `shopping_path`. The paths are exactly `plans/<plan_id>/plan.json` and `plans/<plan_id>/shopping-list.json` relative to the manifest. IDs use the safe ASCII identifier alphabet in the schemas; consumers still treat their meaning as opaque. Forbid absolute/external URLs, parent traversal, percent escapes, backslashes, query strings, fragments, and paths escaping the bundle. Resolve against each containing file's directory and preserve the Pages repository subpath.
@@ -165,6 +175,8 @@ Resolve the static index against Vite's configured application base URL, not a c
 | `getPlan(planId)` | A `Plan` for the API's current revision or the static publication's pinned revision. Missing identities return `plan_not_found`. |
 | `getShoppingList(planId, revision, snapshotId)` | A `ShoppingList` matching all three tokens. A mismatch returns `snapshot_changed` and never displays the wrong grocery totals. |
 
+Phase 4 adds `listShoppingTrips()` and `getShoppingTrip(tripId)` to both readers, returning the same trip DTO (status, covered weeks with revisions, items). In static mode they read only trips in the pinned publication. Trip writes are API-only write services, like plan edits, never reader methods.
+
 These are asynchronous reads. Common application errors carry `code`, `message`, and `details`, reusing API error codes where applicable; static transport errors are not fabricated HTTP responses. `invalid_request` covers invalid arguments, `source_unavailable` covers transport failures, and `source_invalid` covers malformed schemas, unsupported versions, bad paths, or incoherent metadata. A missing referenced static file is an invalid/incomplete publication, not an unknown plan. If a previously loaded pinned publication has been removed, use `publication_expired` and offer explicit refresh. API `409` maps to `snapshot_changed`; refetch the plan and its groceries together with bounded retries. Static mismatches fail the read and offer refresh rather than fetching from another publication or from the NAS.
 
 Keep source-specific context alongside the reader: API mode, or static `publication_id`, `exported_at`, and `selected_months`. It drives freshness labels and “No published plan” states, without adding publication fields to shared plan DTOs. Selected-month navigation uses that context; an overlapping week does not automatically publish navigation for every adjacent month. Browser behavior and error mapping are phase 2 implementation checks; schema validation alone does not prove them.
@@ -173,7 +185,7 @@ Keep source-specific context alongside the reader: API mode, or static `publicat
 
 In phase 2, preserve current browser-local checkmarks in API mode. Scope every local check to source mode, `plan_id`, revision, `snapshot_id`, and ingredient ID so a changed fixture, plan, or publication cannot inherit an unrelated check. In static mode, use optional browser/device-local checks as the default to preserve today's interaction; label that they do not sync between people/devices and are never exported or written back to the NAS. Static totals remain read-only.
 
-In phase 4, home API mode moves household checkmarks to shared database state scoped to the shopping period and ingredient. Public static mode remains local-only; there is no later checkmark writeback or export. Keep purchased state separate from required quantities. If a plan edit increases a checked quantity, apply a documented reopen/adjustment rule instead of treating the extra amount as already purchased. Checkmark changes do not create plan revisions or force republishing.
+In phase 4, shared household state is the shopping trip (see “Domain and plan lifecycle”), not per-ingredient purchased state. Grocery and trip-item checkmarks stay device-local in both modes, are never written to the database or exported, and do not create plan revisions or force republishing. There is no purchased-quantity tracking or reopen/adjustment rule; a plan edited after shopping only shows a “changed since shopping” hint on the covered week.
 
 ## Delivery roadmap and exit criteria
 
@@ -207,15 +219,17 @@ In phase 4, home API mode moves household checkmarks to shared database state sc
 
 **Exit:** home users create and revisit saved weeks after restart, preview and discard without changing current state, and accept revisions without losing their predecessors. Stale/duplicate requests and failed writes cannot silently overwrite or partially commit a plan. SQLite imports preserve the phase 2 read shapes and calculations, and a tested independent backup restores locally.
 
-### Phase 4 — Monthly views and shared home shopping state
+### Phase 4 — Monthly views, shopping trips, and a minimal exporter
 
-Add month/year navigation to both frontend modes. API mode queries overlapping current weeks; static mode shows only months included in the active publication. Display “No published plan” when a month is absent from the manifest; absence from the public site does not assert absence from NAS. A month intersecting up to six weeks still displays the same underlying weekly plans and revisions. Define adjacency across week boundaries only if adding it as a domain rule.
+**4a: shopping trips (domain, storage, API).** Add the `ShoppingTrip` aggregate and its invariants (one trip per week; frozen covered revisions on done; derived items and coverage) in the domain, a `ShoppingTripRepository` port with SQLite and in-memory adapters, and a migration. Extend OpenAPI before adding routes: list/get trips, create, add/remove week, mark done, reopen, delete, each carrying the expected trip `version` (stale → `409`), plus week coverage on plan summaries or a coverage read. Writes stay loopback/home-only like phase 3.
 
-Persist grocery checks for household API users, shared across devices and scoped to a shopping period and ingredient. Preserve static device-local checks described above. Define how purchased status changes when accepted edits increase a grocery quantity. Recipe catalog editing is separate from plan revisions; old assignments retain their saved recipe data.
+**4b: minimal manual exporter.** Pulled forward from phase 6a so the public site can show what to buy. `python -m mealplanner.entrypoints.db_cli export --months 2026-10,2026-11 --out <dir>` reads selected current plans, their groceries, and shopping trips in one read transaction, writes a new immutable `publications/<publication_id>/` directory, validates the whole bundle against `publication.schema.json`, and only then replaces `index.json`. A trip is published only when every week it covers is in the bundle; others are reported and skipped. Publishing is manual: the household copies the bundle to the Pages repository and pushes. Extend the publication contract with `shopping-trips/<trip_id>.json` entries in the manifest (status, covered weeks and revisions, frozen or current items). No credentials, automation, or retention cleanup yet.
 
-Keep shopping totals weekly initially. Monthly/custom-range aggregation needs its own pantry and purchased-state rules and is not implied by month navigation. Keep weekends visibly outside the cooking schedule; do not silently rescale weekly counts for partial weeks or skipped meals. Add catalog editing only if needed for household operation.
+**4c: frontend.** Add month/year navigation to both modes. API mode queries overlapping current weeks; static mode shows only months in the active publication and “No published plan” for absent months (absence from the public site does not assert absence on the NAS). A month intersecting up to six weeks displays the same underlying weekly plans and revisions; a week crossing a month boundary appears in both months. Show week coverage badges. API mode adds create/edit/done/reopen/delete for trips. Static mode adds a read-only, phone-friendly shopping trip view with device-local checkboxes.
 
-**Exit:** month and year boundaries work in API and static mode, including weeks crossing month boundaries. Household checkmarks sync and survive reload. Public users see only successfully published months and local checks stay on their device. Catalog edits do not rewrite saved plans.
+Keep weekly shopping totals per week. A trip's items are a plain sum of its weeks' saved groceries; there are no monthly pantry or purchased-state rules. Keep weekends visibly outside the cooking schedule. Catalog editing is deferred.
+
+**Exit:** month and year boundaries work in API and static mode, including weeks crossing month boundaries. Home users create a trip from several weeks, see what to buy, mark it done, and see those weeks as covered after reload; a week cannot be on two trips; stale trip edits are rejected. An exported bundle validates, shows the published trips on the static site, and a failed export leaves the previous `index.json` active.
 
 ### Phase 5 — Safe recipe replacements
 
@@ -227,7 +241,7 @@ Define alternatives and replacement preview/accept routes before implementation.
 
 ### Phase 6 — NAS operation and public static publishing
 
-**6a: exporter and validation.** Implement an explicit month-selection preview and an export service over the current read interfaces. Read a coherent set of current plans/groceries, including the pantry context used for totals, in a bounded read transaction. Produce immutable publication-scoped plan/grocery files and the reviewed manifest/index; validate every schema, relative path, ID, revision, token, date range, and referenced file before upload. Separate `publication_id` from plan revisions and keep exported files allowlisted. Test failure at each stage leaves the old publication active. Do not put DB files, planner inputs, history, drafts, local grocery checks, environment files, or credentials in the artifact.
+**6a: exporter and validation.** Harden the phase 4 manual exporter: add an explicit month-selection preview and an export service over the current read interfaces. Read a coherent set of current plans/groceries, including the pantry context used for totals, in a bounded read transaction. Produce immutable publication-scoped plan/grocery files and the reviewed manifest/index; validate every schema, relative path, ID, revision, token, date range, and referenced file before upload. Separate `publication_id` from plan revisions and keep exported files allowlisted. Test failure at each stage leaves the old publication active. Do not put DB files, planner inputs, history, drafts, local grocery checks, environment files, or credentials in the artifact.
 
 **6b: NAS deployment and recovery.** Confirm NAS model, CPU, memory, supported container/runtime setup, local volume behavior, and measured solver runtime before choosing deployment resources. Bind the Flask app to the home LAN only after household authentication/authorization is implemented. Package reproducibly with a production application server, app-only data mounts, restart/health checks, and bounded logs. Choose LAN HTTPS/certificate and session handling before deploying login. Keep app state in a persistent local filesystem volume, independent of the container image. Test SQLite-consistent backups copied somewhere independent of the NAS and restore them to a clean environment. A public export is a convenience copy, not a backup. Review actual hosting, power/storage, domain, transfer, and any service costs before launch; use free-only tooling with paid runners/overages disabled unless separately accepted. Do not make provider pricing or resource guarantees without checking the current plan and hardware.
 
@@ -372,9 +386,10 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Frontend | One React app, explicit API/static reader mode, shared DTOs/components | implement in phase 2 |
 | Week/timezone | Monday–Sunday; default `America/Bogota`; weekday cooking | configure before importing saved weeks in phase 3 |
 | Revisions | One stable plan per week; append-only accepted full-plan revisions | phase 3 |
-| Static publication | Manual month selection; immutable bundle; retain latest three successful publications | implement in phase 6 |
+| Static publication | Manual month selection; immutable bundle; retain latest three successful publications. Minimal manual exporter (bundle + manual push) in phase 4; automated outbound publishing in phase 6 | phase 4 / 6 |
 | Static checkmarks | Device-local and never exported/written back | phase 2 |
-| Home checkmarks | Browser-local first; shared DB state in phase 4 | phase 4 |
+| Home checkmarks | Device-local only; shared household state is the shopping trip, not purchased quantities (decided) | — |
+| Shopping trips | Aggregate covering a set of weeks; open/done; items = plain sum of weekly groceries; no pantry or purchase tracking; one trip per week; published to the static site | phase 4 |
 | Cross-week rules | None (decided) | — |
 | Month generation | Batch of independent weekly plans; no monthly or cross-week rules; existing weeks never overwritten | — |
 | Replacement | Preserve unrelated meals; explain infeasibility; candidates must satisfy `domain/weekly_rules.py` (same specifications as generation, solver-independent) | phase 5 |
