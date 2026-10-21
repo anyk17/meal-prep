@@ -22,6 +22,7 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
 import validate_api_contract as api
+from mealplanner.domain import shopping_trip as trip_domain
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs/migration-to-cloud"
@@ -187,6 +188,100 @@ def canonical_metadata(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def validate_trips(
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    bundle_root: Path,
+    published_plans: dict[str, dict[str, Any]],
+    shopping_by_plan: dict[str, dict[str, Any]],
+    trip_schema: dict[str, Any],
+    expected_files: set[Path],
+    checks: api.Checks,
+) -> None:
+    """Check manifest.shopping_trips entries, their files, and coherence with the published plans."""
+    entries = manifest.get("shopping_trips", [])
+    if not isinstance(entries, list):
+        checks.errors.append("manifest shopping_trips must be an array")
+        return
+    trip_ids = [e.get("trip_id") for e in entries if isinstance(e, dict) and isinstance(e.get("trip_id"), str)]
+    checks.require(trip_ids == sorted(set(trip_ids)), "manifest shopping_trips must be sorted by trip_id and unique")
+    plan_owner: dict[str, str] = {}
+    for position, entry in enumerate(entries):
+        label = f"shopping_trips[{position}]"
+        if not isinstance(entry, dict):
+            continue
+        trip_id = entry.get("trip_id")
+        raw_path = entry.get("path")
+        checks.require(raw_path == f"shopping-trips/{trip_id}.json", f"manifest {label}: path must be shopping-trips/<trip_id>.json")
+        path, path_error = safe_relative_path(raw_path, manifest_path.parent, f"{label} path")
+        if path_error:
+            checks.errors.append(path_error)
+        if path is None:
+            continue
+        expected_files.add(path.relative_to(bundle_root))
+        try:
+            trip = load_json(path)
+        except Exception as error:
+            checks.errors.append(f"manifest {label}: referenced trip is invalid JSON: {error}")
+            continue
+        file_label = str(path.relative_to(bundle_root))
+        trip_errors = schema_errors(trip, trip_schema, None, file_label)
+        checks.errors.extend(trip_errors)
+        if trip_errors or not isinstance(trip, dict):
+            continue
+        checks.require(trip["trip_id"] == trip_id, f"{file_label}: trip_id must match its manifest entry")
+        checks.require(
+            (trip["status"] == "done") == (trip["completed_at"] is not None),
+            f"{file_label}: completed_at must be set exactly when the trip is done",
+        )
+        weeks = trip["weeks"]
+        checks.require(
+            [w["week_start"] for w in weeks] == sorted(w["week_start"] for w in weeks),
+            f"{file_label}: weeks must be ordered by week_start",
+        )
+        week_ids = [w["plan_id"] for w in weeks]
+        checks.require(len(set(week_ids)) == len(week_ids), f"{file_label}: week plan_ids must be unique")
+        for week in weeks:
+            plan_id = week["plan_id"]
+            other = plan_owner.setdefault(plan_id, trip["trip_id"])
+            checks.require(other == trip["trip_id"], f"{file_label}: plan {plan_id} is already on trip {other}")
+            summary = published_plans.get(plan_id)
+            if summary is None:
+                checks.errors.append(f"{file_label}: week {plan_id} has no entry in manifest plans")
+                continue
+            checks.require(
+                (week["week_start"], week["week_end"]) == (summary["week_start"], summary["week_end"]),
+                f"{file_label}: week {plan_id} dates must match the published plan",
+            )
+            checks.require(
+                week["current_revision"] >= week["revision"],
+                f"{file_label}: week {plan_id} current_revision must not be below revision",
+            )
+            if trip["status"] == "open":
+                checks.require(
+                    week["revision"] == summary["revision"] and week["snapshot_id"] == summary["snapshot_id"],
+                    f"{file_label}: open trip week {plan_id} must use the published plan revision and snapshot_id",
+                )
+            else:
+                checks.require(
+                    week["revision"] <= summary["revision"],
+                    f"{file_label}: done trip week {plan_id} revision must not exceed the published plan revision",
+                )
+                if week["revision"] == summary["revision"]:
+                    checks.require(
+                        week["snapshot_id"] == summary["snapshot_id"],
+                        f"{file_label}: done trip week {plan_id} snapshot_id must match the published plan at the same revision",
+                    )
+        # Items are checkable only when every week's items come from the published shopping list.
+        if all(
+            w["plan_id"] in shopping_by_plan
+            and w["revision"] == shopping_by_plan[w["plan_id"]].get("revision")
+            for w in weeks
+        ):
+            expected_items = trip_domain.sum_items([(w["plan_id"], shopping_by_plan[w["plan_id"]]) for w in weeks])
+            checks.require(trip["items"] == expected_items, f"{file_label}: items must equal the sum of the weeks' shopping lists")
+
+
 def validate_bundle(
     bundle_root: Path,
     openapi: dict[str, Any],
@@ -273,6 +368,8 @@ def validate_bundle(
         checks.errors.append("manifest plans must be an array")
         summaries = []
     week_order: list[str] = []
+    published_plans: dict[str, dict[str, Any]] = {}
+    shopping_by_plan: dict[str, dict[str, Any]] = {}
     api_schemas = openapi.get("components", {}).get("schemas", {})
     summary_schema = api_schemas.get("PlanSummary", {})
     dto_root = {
@@ -291,6 +388,7 @@ def validate_bundle(
         plan_id = summary.get("plan_id")
         week_start = summary.get("week_start")
         if isinstance(plan_id, str):
+            published_plans[plan_id] = summary
             checks.require(plan_id not in plan_ids, f"manifest plans[{index_in_manifest}]: plan_id must be unique")
             plan_ids.add(plan_id)
         if isinstance(week_start, str):
@@ -351,6 +449,8 @@ def validate_bundle(
         shopping_schema_errors = schema_errors(shopping, shopping_schema, None, f"{shop_path.relative_to(bundle_root)}")
         checks.errors.extend(plan_schema_errors)
         checks.errors.extend(shopping_schema_errors)
+        if not shopping_schema_errors and isinstance(plan_id, str):
+            shopping_by_plan[plan_id] = shopping
         checks.require(canonical_metadata(plan) == {key: summary.get(key) for key in canonical_metadata(plan)}, f"manifest plans[{index_in_manifest}]: summary must exactly match plan metadata")
         if plan.get("timezone") != timezone_name:
             checks.errors.append(f"{plan_path.relative_to(bundle_root)}: timezone must match manifest")
@@ -358,6 +458,10 @@ def validate_bundle(
         if not plan_schema_errors and not shopping_schema_errors:
             checks.errors.extend(api.semantic_errors(plan, shopping, pantry=None, summaries=[summary], verify_canonical=verify_hash))
     checks.require(week_order == sorted(week_order), "manifest plans must be sorted by week_start ascending")
+    validate_trips(
+        manifest, manifest_path, bundle_root, published_plans, shopping_by_plan,
+        {**dto_root, "$ref": "#/components/schemas/ShoppingTrip"}, expected_files, checks,
+    )
     check_bundle_tree(bundle_root, expected_files, checks)
     return checks.errors
 
@@ -455,6 +559,44 @@ def self_test(bundle_root: Path) -> None:
 
     tests.append(("index symlink", symlink_index, "index.json: symlink is forbidden"))
     tests.append(("duplicate JSON key", lambda root: (root / index_rel).write_text('{"schema_version":1,"schema_version":1,"publication_id":"x","manifest_path":"publications/x/manifest.json"}\n', encoding="utf-8"), "duplicate JSON key"))
+
+    trip_rel = manifest["shopping_trips"][0]["path"]
+
+    def trip_file(root: Path) -> Path:
+        return root / index["manifest_path"].replace("manifest.json", trip_rel)
+
+    def mutate_trip(transform: Callable[[dict[str, Any]], Any]) -> Callable[[Path], Any]:
+        return lambda root: mutate_json(trip_file(root), transform)
+
+    def mark_done(trip: dict[str, Any]) -> None:
+        trip.update(status="done", completed_at="2026-10-22T10:00:00+00:00")
+
+    def done_week_too_new(trip: dict[str, Any]) -> None:
+        mark_done(trip)
+        trip["weeks"][0]["revision"] += 1
+        trip["weeks"][0]["current_revision"] += 1
+
+    def week_not_published(trip: dict[str, Any]) -> None:
+        trip["weeks"][0]["plan_id"] = "plan_not_published"
+
+    def orphan_trip_file(root: Path) -> None:
+        shutil.copy(trip_file(root), trip_file(root).with_name("trip_orphan.json"))
+
+    def unsorted_trips(root: Path) -> None:
+        mpath = root / index["manifest_path"]
+        mutate_json(mpath, lambda x: x["shopping_trips"].insert(0, {"trip_id": "trip_zzz", "path": "shopping-trips/trip_zzz.json"}))
+        shutil.copy(trip_file(root), trip_file(root).with_name("trip_zzz.json"))
+        mutate_json(trip_file(root).with_name("trip_zzz.json"), lambda x: x.update(trip_id="trip_zzz"))
+
+    tests.append(("open trip revision mismatch", mutate_trip(lambda t: t["weeks"][0].update(revision=t["weeks"][0]["revision"] + 1, current_revision=t["weeks"][0]["current_revision"] + 1)), "open trip week"))
+    tests.append(("open trip snapshot mismatch", mutate_trip(lambda t: t["weeks"][0].update(snapshot_id="sha256:" + "1" * 64)), "open trip week"))
+    tests.append(("done trip revision above published", mutate_trip(done_week_too_new), "revision must not exceed the published plan revision"))
+    tests.append(("trip week without published plan", mutate_trip(week_not_published), "has no entry in manifest plans"))
+    tests.append(("trip id mismatch", mutate_trip(lambda t: t.update(trip_id="trip_other")), "trip_id must match its manifest entry"))
+    tests.append(("trip items not summed", mutate_trip(lambda t: t["items"][0].update(quantity=t["items"][0]["quantity"] + 1)), "items must equal the sum"))
+    tests.append(("unreferenced trip file", orphan_trip_file, "unexpected public bundle file"))
+    tests.append(("trips not sorted", unsorted_trips, "sorted by trip_id"))
+    tests.append(("trips missing from manifest", lambda root: mutate_json(root / index["manifest_path"], lambda x: x.pop("shopping_trips")), "'shopping_trips' is a required property"))
 
     def nonfinite_number(root: Path) -> None:
         mpath = root / index["manifest_path"]

@@ -6,13 +6,16 @@ Adapters implement these Protocols; the application never imports an adapter.
 from __future__ import annotations
 
 from datetime import date
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.shopping_trip import ShoppingTrip
 from ..domain.snapshot import JsonObject
 from ..domain.solution import MealPlanSolution
 from ..domain.weekly_plan import PlanRevision, Proposal, RetryRecord, WeeklyPlan
+
+if TYPE_CHECKING:  # annotation only; application.publication imports this module
+    from .publication import PublicationBundle
 
 
 class PlannerInputReader(Protocol):
@@ -121,3 +124,11 @@ class ShoppingTripRepository(Protocol):
 
     def delete(self, trip_id: str, expected_version: int) -> None:
         """Delete the trip (freeing its weeks). Raises TripNotFound or StaleVersion."""
+
+
+class PublicationWriter(Protocol):
+    """Output boundary for a checked publication bundle (implemented by adapters/publication_files)."""
+
+    def write(self, bundle: "PublicationBundle") -> None:
+        """Make the bundle the active publication, or raise PublicationError leaving the
+        previously active publication untouched. The new publication becomes active last."""

@@ -36,5 +36,11 @@
       "plan_path": "plans/plan_2026_10_26/plan.json",
       "shopping_path": "plans/plan_2026_10_26/shopping-list.json"
     }
+  ],
+  "shopping_trips": [
+    {
+      "trip_id": "trip_example_01",
+      "path": "shopping-trips/trip_example_01.json"
+    }
   ]
 }

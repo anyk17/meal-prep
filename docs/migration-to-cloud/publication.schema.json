@@ -32,7 +32,7 @@
       "title": "Immutable publication manifest",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "publication_id", "exported_at", "selected_months", "timezone", "plans"],
+      "required": ["schema_version", "publication_id", "exported_at", "selected_months", "timezone", "plans", "shopping_trips"],
       "properties": {
         "schema_version": { "const": 1 },
         "publication_id": { "$ref": "#/$defs/PublicationId" },
@@ -60,6 +60,24 @@
           "type": "array",
           "items": { "$ref": "#/$defs/PublishedPlan" },
           "description": "Current plans overlapping selected_months, including complete weeks that cross a month boundary. Empty means no saved plans were available for the selected months."
+        },
+        "shopping_trips": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PublishedTrip" },
+          "description": "Shopping trips whose every week is in plans, sorted by trip_id. Empty means no trip was published."
+        }
+      }
+    },
+    "PublishedTrip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trip_id", "path"],
+      "properties": {
+        "trip_id": { "$ref": "#/$defs/PublicationId" },
+        "path": {
+          "type": "string",
+          "pattern": "^shopping-trips/[A-Za-z0-9][A-Za-z0-9_-]*\\.json$",
+          "description": "Relative to this immutable manifest: exactly shopping-trips/<trip_id>.json. The file validates against OpenAPI's ShoppingTrip schema."
         }
       }
     },

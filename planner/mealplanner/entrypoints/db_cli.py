@@ -3,6 +3,8 @@
     python -m mealplanner.entrypoints.db_cli import --db var/mealplanner.db [--fixture] [--replace-inputs]
     python -m mealplanner.entrypoints.db_cli backup --db var/mealplanner.db --dest var/backup.db
     python -m mealplanner.entrypoints.db_cli restore --src var/backup.db --db var/mealplanner.db [--force]
+    python -m mealplanner.entrypoints.db_cli migrate [--db var/mealplanner.db]
+    python -m mealplanner.entrypoints.db_cli export --months 2026-10,2026-11 --out <dir> [--db var/mealplanner.db]
 """
 
 from __future__ import annotations
@@ -12,18 +14,30 @@ import json
 import os
 import sqlite3
 import sys
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from ..adapters.sqlite.migrations import LATEST_VERSION, DatabaseError, connect, current_version
+from ..adapters.publication_files import FilePublicationWriter
+from ..adapters.sqlite.migrations import (
+    LATEST_VERSION,
+    DatabaseError,
+    connect,
+    current_version,
+    migrate as apply_migrations,
+)
 from ..adapters.sqlite.store import (
     InputConflict,
     InputImportReport,
     SqlitePlannerInputReader,
+    SqlitePlanReadAdapter,
     SqlitePlanRepository,
+    SqliteShoppingTripRepository,
     import_planner_inputs,
 )
+from ..application.publication import PublicationError, PublicationResult, PublicationService
+from ..application.shopping_trips import ShoppingTripService
 from ..adapters.yaml_inputs import YamlPlannerInputReader
 from ..domain.snapshot import normalize_snapshot
 from ..domain.weekly_plan import (
@@ -141,6 +155,83 @@ def restore(src: Path | str, db_path: Path | str, *, force: bool = False) -> Pat
     return db_path
 
 
+def migrate_database(db_path: Path | str) -> list[int]:
+    """Apply pending schema migrations to an existing database; returns the versions applied."""
+    path = Path(db_path)
+    if not path.is_file():
+        raise DatabaseError(f"database not found: {path} (use the import command to create one)")
+    with closing(connect(path)) as conn:
+        version = current_version(conn)
+        if version > LATEST_VERSION:
+            raise DatabaseError(
+                f"database schema version {version} is newer than supported {LATEST_VERSION}"
+            )
+        return apply_migrations(conn)
+
+
+def full_bundle_validator() -> Callable[[Path], Sequence[str]]:
+    """The repository's JSON-schema bundle validator (scripts/validate_publication_contract.py).
+
+    Needs a repository checkout and the contract requirements (jsonschema, PyYAML).
+    """
+    scripts = PROJECT_ROOT / "scripts"
+    if not (scripts / "validate_publication_contract.py").is_file():
+        raise DatabaseError("scripts/validate_publication_contract.py not found; run from a checkout")
+    sys.path.insert(0, str(scripts))
+    try:
+        import validate_publication_contract as contract
+    except ImportError as exc:
+        raise DatabaseError(
+            f"cannot load the bundle validator ({exc}); install scripts/requirements-contract.txt"
+        ) from exc
+    checks = contract.api.Checks()
+    openapi, schema, _, resolver = contract.validate_schema_documents(checks)
+    if checks.errors:
+        raise DatabaseError("publication contract files are invalid: " + "; ".join(checks.errors))
+    return lambda root: contract.validate_bundle(root, openapi, schema, resolver)
+
+
+def export_publication(
+    db_path: Path | str,
+    out_dir: Path | str,
+    months: Sequence[str],
+    timezone_name: str,
+    *,
+    clock: Callable[[], datetime] | None = None,
+    validate: Callable[[Path], Sequence[str]] | None = None,
+) -> PublicationResult:
+    """Export the current plans and shopping trips of the selected months into out_dir."""
+    clock = clock or (lambda: datetime.now(timezone.utc))
+    reader = SqlitePlanReadAdapter(db_path)  # first: DatabaseError for a missing/unmigrated DB, never creates one
+    plans = SqlitePlanRepository(db_path)
+    service = PublicationService(
+        reader,
+        ShoppingTripService(SqliteShoppingTripRepository(db_path), plans, clock),
+        clock,
+        timezone_name,
+        FilePublicationWriter(out_dir, validate),
+    )
+    return service.export(months)
+
+
+def _print_export(result: PublicationResult, out_dir: Path) -> None:
+    print(f"publication_id: {result.publication_id}")
+    print(f"exported_at: {result.exported_at}  months: {', '.join(result.selected_months)}")
+    print(f"plans included: {len(result.plans)}")
+    for plan in result.plans:
+        print(f"  {plan['plan_id']}  {plan['week_start']}..{plan['week_end']}  revision {plan['revision']}")
+    print(f"trips included: {len(result.trips_included)}")
+    for trip in result.trips_included:
+        print(f"  {trip['trip_id']}  {trip['status']}  {trip['name']}")
+    print(f"trips skipped: {len(result.trips_skipped)}")
+    for skipped in result.trips_skipped:
+        print(f"  {skipped.trip_id}  {skipped.name}: {skipped.reason}")
+    print(
+        f"next: copy the contents of {out_dir} into the Pages site's publication/ directory "
+        "(index.json last), then commit and push."
+    )
+
+
 def _print_report(report: InputImportReport) -> None:
     print(
         f"inputs: {len(report.added)} added, {len(report.unchanged)} unchanged, "
@@ -172,6 +263,20 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--src", required=True)
     r.add_argument("--db")
     r.add_argument("--force", action="store_true")
+    m = sub.add_parser("migrate", help="apply pending schema migrations to an existing database")
+    m.add_argument("--db")
+    e = sub.add_parser("export", help="write a static publication bundle for the selected months")
+    e.add_argument("--db")
+    e.add_argument("--months", required=True, help="comma-separated YYYY-MM list, e.g. 2026-10,2026-11")
+    e.add_argument("--out", required=True, help="output directory (becomes the site's publication/)")
+    e.add_argument(
+        "--timezone", default=os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota")
+    )
+    e.add_argument(
+        "--skip-schema-validation",
+        action="store_true",
+        help="skip the JSON-schema bundle validator (coherence checks still run)",
+    )
     args = parser.parse_args(argv)
     try:
         db = resolve_db_path(args.db)
@@ -183,6 +288,17 @@ def main(argv: list[str] | None = None) -> int:
                     raise DatabaseError("--week-start must be a Monday")
                 outcome = import_fixture(db, args.plan, args.shopping, week, args.timezone)
                 print(f"fixture {week.isoformat()}: {outcome}")
+        elif args.command == "migrate":
+            applied = migrate_database(db)
+            if applied:
+                print(f"migrated {db}: applied versions {', '.join(map(str, applied))}")
+            else:
+                print(f"{db} is already at schema version {LATEST_VERSION}")
+        elif args.command == "export":
+            months = [part.strip() for part in args.months.split(",") if part.strip()]
+            validator = None if args.skip_schema_validation else full_bundle_validator()
+            out_dir = Path(args.out)
+            _print_export(export_publication(db, out_dir, months, args.timezone, validate=validator), out_dir)
         elif args.command == "backup":
             print(f"backup written: {backup(db, args.dest)}")
         else:
@@ -197,8 +313,15 @@ def main(argv: list[str] | None = None) -> int:
         for violation in exc.violations:
             print(f"  {violation.rule}: {violation.message}", file=sys.stderr)
         return 1
+    except PublicationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        for detail in exc.errors:
+            print(f"  {detail}", file=sys.stderr)
+        return 1
     except (DatabaseError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        if isinstance(exc, DatabaseError) and "schema version" in str(exc):
+            print("hint: run `python -m mealplanner.entrypoints.db_cli migrate` first", file=sys.stderr)
         return 1
     return 0
 

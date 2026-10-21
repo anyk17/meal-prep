@@ -137,6 +137,8 @@ publication/
 
 The index contains `schema_version`, `publication_id`, and `manifest_path`, exactly `publications/<publication_id>/manifest.json` relative to the index. The manifest contains `schema_version`, the same `publication_id`, `exported_at`, sorted unique `selected_months` in `YYYY-MM` form, one household IANA `timezone`, and `plans`. Each entry contains `summary`, `plan_path`, and `shopping_path`. The paths are exactly `plans/<plan_id>/plan.json` and `plans/<plan_id>/shopping-list.json` relative to the manifest. IDs use the safe ASCII identifier alphabet in the schemas; consumers still treat their meaning as opaque. Forbid absolute/external URLs, parent traversal, percent escapes, backslashes, query strings, fragments, and paths escaping the bundle. Resolve against each containing file's directory and preserve the Pages repository subpath.
 
+The manifest also has a required `shopping_trips` array (empty allowed) of `{ "trip_id", "path" }`, sorted by unique `trip_id`, with `path` exactly `shopping-trips/<trip_id>.json` relative to the manifest. Each file validates against OpenAPI's `ShoppingTrip` schema (no copied DTO) and its `trip_id` equals the entry's. Coherence: every week of a published trip has an entry in `plans` with the same `plan_id` and dates; for an open trip each week's `revision` and `snapshot_id` equal the published plan's; for a done trip the week's `revision` is at most the published plan's (items are frozen to the covered revision); a plan is on at most one published trip; and when the trip's revisions equal the published ones its `items` must equal the sum of the published shopping lists. A trip whose weeks are not all in the bundle is not published. Unreferenced trip files fail validation like any other.
+
 Entries are sorted by `week_start`, have unique plan IDs and week starts, and include only full weeks overlapping at least one selected month. Each summary must exactly match its plan metadata; plan and grocery identities, week dates, revision, and snapshot token must agree. Every referenced file must exist. Unknown fields and unreferenced data files fail bundle validation. A selected month may have no saved plans, so `plans: []` is valid; no placeholder plan is synthesized. The exporter must check completeness against the selected database weeks: a public bundle alone cannot prove whether private plans were omitted. The [populated example](static-examples/populated/index.json) includes October 19–25 and October 26–November 1; the [empty example](static-examples/empty/index.json) selects December with no plans. These are prepared fixtures, not exporter output.
 
 For phase 2 static preview, mount or copy the contents of one fixture root (`static-examples/populated/` or `static-examples/empty/`) beneath the frontend's `publication/` directory. The fixture's `index.json` then resolves at the configured `publication/index.json` path; the two examples are alternative bundles, not sibling publications in one deployment.
@@ -336,6 +338,19 @@ Open `http://127.0.0.1:5174/meal-prep/`. This uses the checked-in populated publ
 The default view is explicitly October 19–25, 2026. To anchor API data to another Monday, set `MEALPLANNER_WEEK_START=YYYY-MM-DD` before starting Flask and set matching `VITE_DEFAULT_FROM=YYYY-MM-DD VITE_DEFAULT_TO=YYYY-MM-DD` before starting Vite. The API timezone defaults to `America/Bogota` and accepts `MEALPLANNER_TIMEZONE`. Static sample dates remain those in their manifests. Date navigation is a later milestone.
 
 Check both modes for weekly cards, recipe details, statistics, theme, grocery checkmarks, and refresh. Stop Flask to check the API error state; static mode should continue working independently. A failed refresh should retain the last complete plan and grocery view. Checkmarks are scoped to mode and snapshot identity.
+
+### Run Phase 4 (manual export) locally
+
+If the HTTP server answers `503 source_unavailable` for a SQLite database, the file is probably unmigrated (the API never migrates a database it only reads). Apply pending migrations to an existing database, then export:
+
+```sh
+.venv/bin/python -m mealplanner.entrypoints.db_cli migrate [--db var/mealplanner.db]
+.venv/bin/python -m mealplanner.entrypoints.db_cli export --months 2026-10,2026-11 --out /tmp/publication [--db var/mealplanner.db] [--timezone America/Bogota]
+```
+
+`migrate` refuses a missing file (use `import` to create a database) and is idempotent. `export` never writes to the database. It publishes the current revision of every plan whose Monday-Sunday week overlaps a selected month, plus every shopping trip whose weeks are all in that set (others are listed as skipped with the reason), into `<out>/publications/<publication_id>/`, validates the written bundle (including `scripts/validate_publication_contract.py`; `--skip-schema-validation` skips only that JSON-schema pass), and only then replaces `<out>/index.json`. A failure before that last step leaves the previous `index.json` untouched and removes the new directory. Earlier publication directories in `--out` are kept (no retention cleanup yet).
+
+Reads are not one SQLite transaction (plans, groceries and trips come through separate repositories); the exporter checks that they agree and re-reads up to three times if the data changed mid-export, then fails. Publishing stays manual: copy the contents of `<out>` into the Pages site's `publication/` directory (index last) and push. Old publication directories you no longer want must be removed by hand for now, and the validator only accepts one active publication, so validate the Pages directory only after pruning to the active one.
 
 ### Phase 2 checks and build scope
 
