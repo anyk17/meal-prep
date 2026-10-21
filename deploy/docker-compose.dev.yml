@@ -20,6 +20,7 @@ services:
     image: meal-prep:dev
     user: "${DEV_UID:-1000}:${DEV_GID:-1000}"  # must own var/docker-data
     read_only: true
+    restart: unless-stopped  # day-to-day app: comes back when WSL and Docker start
     tmpfs:
       - /tmp:size=64m,mode=1777
     cap_drop: [ALL]
