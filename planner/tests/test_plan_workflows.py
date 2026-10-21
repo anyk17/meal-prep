@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from mealplanner.domain.month import week_seed
+
 from mealplanner.adapters.memory import InMemoryPlanReadAdapter, InMemoryPlanRepository
 from mealplanner.adapters.ortools import OrToolsPlanGenerator
 from mealplanner.domain.solution import MealPlanSolution
@@ -138,6 +140,17 @@ def test_duplicate_week_rejected(env: Env) -> None:
     with pytest.raises(DuplicateWeek):  # storage-level uniqueness too
         wp = env.repo.get_plan_by_week(FUTURE)
         env.repo.create_plan(wp, env.repo.get_revision(wp.plan_id, 1))
+
+
+
+def test_create_without_seed_uses_the_week_seed(env: Env) -> None:
+    """Regression: every week created without a seed used to get seed 42 and the same plan."""
+    nxt = FUTURE + timedelta(days=7)
+    first, second = env.svc.create_plan(FUTURE), env.svc.create_plan(nxt)
+    assert first.snapshot.plan["seed"] == week_seed(FUTURE)
+    assert second.snapshot.plan["seed"] == week_seed(nxt)
+    meals = lambda rev: [s["recipe_id"] for s in rev.snapshot.plan["slots"]]  # noqa: E731
+    assert meals(first) != meals(second)
 
 
 def test_create_week_rules(env: Env) -> None:

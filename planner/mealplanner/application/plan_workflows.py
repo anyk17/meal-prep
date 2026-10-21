@@ -7,6 +7,7 @@ transaction; commits go through the repository's atomic append_revision.
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import uuid
 from collections.abc import Callable
@@ -74,6 +75,7 @@ class PlanWorkflowService:
         timezone: str = "America/Bogota",
         proposal_ttl: timedelta = DEFAULT_PROPOSAL_TTL,
         id_factory: Callable[[], str] = lambda: uuid.uuid4().hex,
+        seed_factory: Callable[[], int] = lambda: secrets.randbelow(2**31),
     ) -> None:
         try:
             self._tz = ZoneInfo(timezone)
@@ -86,6 +88,7 @@ class PlanWorkflowService:
         self._generator = generator
         self._ttl = proposal_ttl
         self._new_id = id_factory
+        self._new_seed = seed_factory
         self._lock = threading.Lock()  # serialises check-then-write in this process
 
     # ------------------------------------------------------------ reads (never solve)
@@ -113,8 +116,14 @@ class PlanWorkflowService:
 
     # ------------------------------------------------------------ create
 
-    def create_plan(self, week_start: date, seed: int = 42) -> PlanRevision:
-        """Create revision 1 for a current or future week (one plan per week)."""
+    def create_plan(self, week_start: date, seed: int | None = None) -> PlanRevision:
+        """Create revision 1 for a current or future week (one plan per week).
+
+        Without a seed the week gets `week_seed(week_start)`, the same seed a month fill
+        uses, so different weeks get different plans.
+        """
+        if seed is None:
+            seed = week_seed(week_start)
         if week_start.weekday() != 0:
             raise InvalidWeek("week_start must be a Monday")
         if self._repo.get_plan_by_week(week_start) is not None:
@@ -194,7 +203,10 @@ class PlanWorkflowService:
         self._check_expected(expected_revision, plan.current_revision)
         self._require_future_week(plan)
         if seed is None:
-            seed = int(current.snapshot.plan["seed"]) + 1
+            # A fresh seed per click, never the current one; the proposal records it.
+            seed = self._new_seed()
+            while seed == int(current.snapshot.plan["seed"]):
+                seed = self._new_seed()
         inputs = self._read_inputs()  # solver runs below, outside any transaction
         candidate = self._solve(inputs, seed, plan.week_start)
         pantry = tuple(inputs.pantry)

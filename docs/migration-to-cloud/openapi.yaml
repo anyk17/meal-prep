@@ -83,7 +83,7 @@ paths:
       summary: Create revision 1 of the plan for a week
       description: |-
         Solves and stores a new plan for a current or future Monday-through-Sunday week
-        (one plan per week); seed defaults to 42. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden. Solver runs are bounded: at most
+        (one plan per week); seed defaults to the week's deterministic seed (int(YYYYMMDD of its Monday) mod 2**31), as in a month fill. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden. Solver runs are bounded: at most
         MEALPLANNER_MAX_CONCURRENT_GENERATIONS run at once (others get 503 generation_busy,
         never queued) and each solve has a time limit (422 generation_failed). Every candidate is checked
         against the weekly rules (protein counts, adjacency, carbs, recipe limits, lunch/dinner
@@ -304,7 +304,7 @@ paths:
         The current revision is not changed. changes lists per-slot differences;
         identical is true when nothing would change. plan and shopping_list are the full
         candidate content that accept would commit as revision base_revision + 1. Only
-        future weeks may be regenerated. seed defaults to the current seed + 1. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        future weeks may be regenerated. seed defaults to a fresh random seed (different from the current one), recorded in the proposal. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
       parameters:
         - $ref: '#/components/parameters/PlanId'
       requestBody:
@@ -1775,7 +1775,7 @@ components:
           type: integer
           minimum: 0
           maximum: 2147483647
-          description: Solver seed; defaults to 42.
+          description: Solver seed; defaults to the week's deterministic seed, int(YYYYMMDD of its Monday) mod 2**31.
     ProposeRequest:
       type: object
       additionalProperties: false
@@ -1789,7 +1789,7 @@ components:
           type: integer
           minimum: 0
           maximum: 2147483647
-          description: Solver seed; defaults to the current plan seed + 1.
+          description: Solver seed; defaults to a fresh random seed different from the current plan seed.
     ExpectedRevisionRequest:
       type: object
       additionalProperties: false

@@ -295,7 +295,7 @@ def register_write_routes(
                 raise BodyError("week_start", "week_start must be a real calendar date") from exc
             seed = _int_field(body, "seed", required=False, low=0, high=MAX_SEED)
             revision = generating(
-                lambda: service().create_plan(week, 42 if seed is None else seed)
+                lambda: service().create_plan(week, seed)
             )
             if not isinstance(revision, PlanRevision):
                 return revision  # generation_busy response
