@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from ...adapters.sqlite.migrations import DatabaseError
 from ...application.errors import InvalidRequest, PlanNotFound, SnapshotChanged
 from ...application.plan_reads import PlanReadService
 
@@ -172,3 +174,36 @@ def register_read_routes(
                 "The requested shopping snapshot is no longer current. Refetch the plan and its shopping list.",
             )
         return jsonify(result)
+
+    @app.get("/api/v1/catalog/variants")
+    def list_swap_variants():
+        """Swappable recipe variants from the current planner inputs (SQLite-backed API only)."""
+        failure = app.config["PLAN_SOURCE_FAILURE"]
+        workflow = app.config.get("PLAN_WORKFLOW_SERVICE")
+        if failure or workflow is None:
+            # JSON snapshot mode has no planner inputs to list: same 503 as an unavailable source.
+            return _error(
+                503,
+                failure or "source_unavailable",
+                "The recipe catalog needs the SQLite-backed API (MEALPLANNER_DB)."
+                if not failure
+                else "The plan data source is temporarily unavailable.",
+            )
+        try:
+            items = workflow.list_swap_variants()
+        except (DatabaseError, sqlite3.Error, OSError):
+            return _error(503, "source_unavailable", "The plan data source is temporarily unavailable.")
+        return jsonify(
+            {
+                "items": [
+                    {
+                        "recipe_id": v.recipe_id,
+                        "variant_id": v.variant_id,
+                        "name": v.name,
+                        "protein": v.protein,
+                        "carb": v.carb,
+                    }
+                    for v in items
+                ]
+            }
+        )

@@ -16,6 +16,7 @@ from typing import Any
 from ...application.errors import InvalidRequest, PlanNotFound
 from ...application.plan_workflows import PlanWorkflowService
 from ...domain.month import MONTH_PATTERN, MonthFillResult
+from ...domain.swap import SCOPES, SlotNotEditable, SlotNotFound, SwapOutcome, SwapPreview, VariantNotFound
 from ...domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
@@ -52,6 +53,9 @@ ERROR_MAP: list[tuple[type[Exception], int, str]] = [
     (NothingToUndo, 409, "nothing_to_undo"),
     (LinkedPairSplit, 409, "linked_pair_split"),
     (WeekNotEditable, 409, "week_not_editable"),
+    (SlotNotFound, 404, "slot_not_found"),
+    (VariantNotFound, 404, "variant_not_found"),
+    (SlotNotEditable, 409, "slot_not_editable"),
     (DuplicateWeek, 409, "duplicate_week"),
     (InvalidWeek, 400, "invalid_week"),
     (GenerationFailed, 422, "generation_failed"),
@@ -132,6 +136,7 @@ def serialize_proposal(p: Proposal) -> dict[str, Any]:
         "created_at": p.created_at.isoformat(),
         "expires_at": p.expires_at.isoformat(),
         "identical": p.is_identical,
+        "replaced_swaps": p.replaced_swaps,
         "changes": [serialize_change(c) for c in p.changes],
         "plan": p.snapshot.plan,
         "shopping_list": p.snapshot.shopping_list,
@@ -146,6 +151,37 @@ def serialize_result(r: MutationResult) -> dict[str, Any]:
         "changed": r.changed,
         "replayed": r.replayed,
     }
+
+
+def serialize_swap_preview(p: SwapPreview) -> dict[str, Any]:
+    return {
+        "plan_id": p.plan_id,
+        "base_revision": p.base_revision,
+        "changes": [serialize_change(c) for c in p.changes],
+        "grocery_delta": list(p.grocery_delta),
+        "rule_warnings": list(p.rule_warnings),
+        "trip": p.trip,
+    }
+
+
+def serialize_swap_outcome(o: SwapOutcome) -> dict[str, Any]:
+    return {"plan": o.snapshot.plan, "rule_warnings": list(o.rule_warnings)}
+
+
+def _swap_body() -> tuple[str, str, str, int]:
+    body = _parse_body({"slot_id", "variant_id", "scope", "expected_revision"})
+    ids: list[str] = []
+    for name in ("slot_id", "variant_id"):
+        value = body.get(name)
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+            raise BodyError(name, f"{name} must be a string of 1 to 128 characters")
+        ids.append(value)
+    scope = body.get("scope")
+    if scope not in SCOPES:
+        raise BodyError("scope", f"scope must be one of: {', '.join(SCOPES)}")
+    expected = _int_field(body, "expected_revision", required=True, low=1, high=MAX_REVISION)
+    assert expected is not None
+    return ids[0], ids[1], scope, expected
 
 
 def serialize_month_fill(r: MonthFillResult) -> dict[str, Any]:
@@ -259,6 +295,9 @@ def register_write_routes(
             "linked_pair_split": "A linked lunch and dinner must change together.",
             "rule_violation": "The plan breaks weekly rules.",
             "plan_not_found": "No plan exists for the requested plan_id.",
+            "slot_not_found": "This plan has no meal slot with that slot_id.",
+            "variant_not_found": "The catalog has no recipe variant with that variant_id.",
+            "slot_not_editable": "Meals before today cannot be swapped.",
         }
         return fixed.get(code, str(exc) or code)
 
@@ -390,6 +429,39 @@ def register_write_routes(
             body = _parse_body({"expected_revision"})
             expected = _int_field(body, "expected_revision", required=True, low=1, high=MAX_REVISION)
             return jsonify(serialize_result(service().undo(plan_id, expected, key)))
+
+        return mapped(run)
+
+    @app.post("/api/v1/plans/<plan_id>/swaps/preview")
+    def preview_swap(plan_id: str):
+        denied = guard() or check_plan_id(plan_id)
+        if denied:
+            return denied
+
+        def run():
+            slot_id, variant_id, scope, expected = _swap_body()
+            preview = service().preview_swap(plan_id, slot_id, variant_id, scope, expected)
+            return jsonify(serialize_swap_preview(preview))
+
+        return mapped(run)
+
+    @app.post("/api/v1/plans/<plan_id>/swaps")
+    def swap(plan_id: str):
+        denied = guard() or check_plan_id(plan_id)
+        if denied:
+            return denied
+
+        def run():
+            key = idempotency_key()
+            slot_id, variant_id, scope, expected = _swap_body()
+            outcome = service().swap(plan_id, slot_id, variant_id, scope, expected, key)
+            response = jsonify(serialize_swap_outcome(outcome))
+            # 201 only when this call appended the revision; a no-op or replay is 200.
+            created = outcome.result.changed and not outcome.result.replayed
+            response.status_code = 201 if created else 200
+            if created:
+                response.headers["Location"] = f"/api/v1/plans/{plan_id}"
+            return response
 
         return mapped(run)
 

@@ -160,6 +160,30 @@ export function createPlanEditor(base = '/api/v1') {
       requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
       await request('DELETE', `/shopping-trips/${encodeURIComponent(tripId)}?expected_version=${expectedVersion}`);
     },
+    // ---- Meal swaps. Preview is stateless; apply carries expected_revision and an Idempotency-Key. ----
+    async getCatalogVariants() {
+      const result = await request('GET', '/catalog/variants');
+      if (!result || !Array.isArray(result.items)) throw new ReaderError('source_invalid', 'The API returned an invalid recipe catalog.');
+      return result.items;
+    },
+    async previewSwap(planId, swap) {
+      const body = swapBody(planId, swap);
+      const result = await request('POST', `/plans/${encodeURIComponent(planId)}/swaps/preview`, { body });
+      if (!result || result.plan_id !== planId || !Array.isArray(result.changes) || !Array.isArray(result.grocery_delta) || !Array.isArray(result.rule_warnings)) {
+        throw new ReaderError('source_invalid', 'The API returned an invalid swap preview.');
+      }
+      return result;
+    },
+    async applySwap(planId, swap) {
+      const body = swapBody(planId, swap);
+      const result = await request('POST', `/plans/${encodeURIComponent(planId)}/swaps`, {
+        body, idempotencyAction: `swap:${planId}:${body.slot_id}:${body.variant_id}:${body.scope}:${body.expected_revision}`,
+      });
+      if (!result || typeof result !== 'object' || !result.plan || result.plan.plan_id !== planId || !Number.isInteger(result.plan.revision)) {
+        throw new ReaderError('source_invalid', 'The API returned an invalid swap result.');
+      }
+      return { plan: result.plan, ruleWarnings: Array.isArray(result.rule_warnings) ? result.rule_warnings : [] };
+    },
     async fillMonth(month) {
       if (typeof month !== 'string' || !MONTH_PATTERN.test(month)) throw new ReaderError('invalid_request', 'A month in YYYY-MM form is required.');
       const result = await request('POST', `/months/${month}/fill`, { body: {} });
@@ -169,11 +193,21 @@ export function createPlanEditor(base = '/api/v1') {
   };
 }
 
+function swapBody(planId, { slotId, variantId, scope = 'pair', expectedRevision } = {}) {
+  requireId(planId);
+  requireId(slotId, 'slot identity');
+  requireId(variantId, 'recipe variant identity');
+  if (scope !== 'pair' && scope !== 'single') throw new ReaderError('invalid_request', 'Swap scope must be pair or single.');
+  requireRevision(expectedRevision);
+  return { slot_id: slotId, variant_id: variantId, scope, expected_revision: expectedRevision };
+}
+
 function checkProposal(proposal, planId) {
   if (!proposal || typeof proposal !== 'object' || proposal.plan_id !== planId || typeof proposal.proposal_id !== 'string' || !Number.isInteger(proposal.base_revision) || !Array.isArray(proposal.changes) || typeof proposal.identical !== 'boolean') {
     throw new ReaderError('source_invalid', 'The API returned an invalid proposal.');
   }
   validatePair(proposal.plan, proposal.shopping_list);
+  proposal.replaced_swaps = Number.isInteger(proposal.replaced_swaps) && proposal.replaced_swaps > 0 ? proposal.replaced_swaps : 0;
   return proposal;
 }
 

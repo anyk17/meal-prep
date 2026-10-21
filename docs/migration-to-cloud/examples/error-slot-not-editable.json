@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "slot_not_editable",
+    "details": [],
+    "message": "Meals before today cannot be swapped."
+  }
+}

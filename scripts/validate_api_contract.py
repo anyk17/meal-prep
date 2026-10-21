@@ -41,6 +41,9 @@ EXPECTED_PATHS = {
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}": {"get", "delete"},
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept": {"post"},
     "/api/v1/plans/{plan_id}/undo": {"post"},
+    "/api/v1/plans/{plan_id}/swaps": {"post"},
+    "/api/v1/plans/{plan_id}/swaps/preview": {"post"},
+    "/api/v1/catalog/variants": {"get"},
     "/api/v1/capabilities": {"get"},
     "/api/v1/months/{month}/fill": {"post"},
     "/api/v1/shopping-trips": {"get", "post"},
@@ -57,13 +60,13 @@ EMPTY_BODY_PATHS = {"/api/v1/months/{month}/fill"}
 IDEMPOTENT_PATHS = {
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept",
     "/api/v1/plans/{plan_id}/undo",
+    "/api/v1/plans/{plan_id}/swaps",
 }
 # Operations whose 422 must document the weekly-rule failure (error code rule_violation).
 RULE_VIOLATION_OPERATIONS = {
     ("/api/v1/plans", "post"),
     ("/api/v1/plans/{plan_id}/proposals", "post"),
     ("/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept", "post"),
-    ("/api/v1/plans/{plan_id}/undo", "post"),
 }
 HTTP_METHODS = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -289,7 +292,7 @@ def check_contract(spec, checks):
                 )
                 checks.require(
                     has_key == (path in IDEMPOTENT_PATHS and method.lower() == "post"),
-                    f"{method.upper()} {path}: required Idempotency-Key header must be present exactly on accept and undo",
+                    f"{method.upper()} {path}: required Idempotency-Key header must be present exactly on accept, undo and swap",
                 )
                 for status in ("403",):
                     if path != "/api/v1/plans" or method.lower() == "post":
@@ -737,6 +740,12 @@ def self_test_contract(spec):
         "missing Idempotency-Key": lambda d: d["paths"][
             "/api/v1/plans/{plan_id}/undo"
         ]["post"].__setitem__("parameters", [{"$ref": "#/components/parameters/PlanId"}]),
+        "missing swap Idempotency-Key": lambda d: d["paths"][
+            "/api/v1/plans/{plan_id}/swaps"
+        ]["post"].__setitem__("parameters", [{"$ref": "#/components/parameters/PlanId"}]),
+        "open swap body": lambda d: d["components"]["schemas"]["SwapRequest"].__setitem__(
+            "additionalProperties", True
+        ),
         "open request body": lambda d: d["components"]["schemas"]["CreatePlanRequest"].__setitem__(
             "additionalProperties", True
         ),

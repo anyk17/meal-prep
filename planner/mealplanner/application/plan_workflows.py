@@ -16,7 +16,23 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..domain.month import MonthFillResult, WeekFillOutcome, parse_month, week_seed, weeks_of_month
 from ..domain.planner_inputs import PlannerInputs
-from ..domain.snapshot import PlanSnapshot, normalize_snapshot
+from ..domain.snapshot import JsonObject, PlanSnapshot, normalize_snapshot
+from ..domain.shopping_trip import DONE
+from ..domain.swap import (
+    SCOPES,
+    SlotNotEditable,
+    SwapOutcome,
+    SwapPreview,
+    SwapVariant,
+    VariantNotFound,
+    apply_swap,
+    catalog_variants,
+    extra_needed,
+    find_slot,
+    grocery_delta,
+    list_swap_variants,
+    swapped_assignment_ids,
+)
 from ..domain.weekly_rules import check_weekly_rules
 from ..domain.weekly_plan import (
     DuplicateWeek,
@@ -32,6 +48,7 @@ from ..domain.weekly_plan import (
     RetryIdReused,
     RetryRecord,
     RuleViolationError,
+    SlotChange,
     StaleRevision,
     WeeklyPlan,
     WeekNotEditable,
@@ -46,7 +63,7 @@ from ..domain.weekly_plan import (
 )
 from .errors import InvalidRequest, PlanNotFound
 from .generation import generate
-from .ports import PlanGenerator, PlannerInputReader, PlanWorkflowRepository
+from .ports import PlanGenerator, PlannerInputReader, PlanWorkflowRepository, ShoppingTripRepository
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +93,7 @@ class PlanWorkflowService:
         proposal_ttl: timedelta = DEFAULT_PROPOSAL_TTL,
         id_factory: Callable[[], str] = lambda: uuid.uuid4().hex,
         seed_factory: Callable[[], int] = lambda: secrets.randbelow(2**31),
+        trips: ShoppingTripRepository | None = None,
     ) -> None:
         try:
             self._tz = ZoneInfo(timezone)
@@ -89,6 +107,7 @@ class PlanWorkflowService:
         self._ttl = proposal_ttl
         self._new_id = id_factory
         self._new_seed = seed_factory
+        self._trips = trips  # read-only: only used to report shopping trip impact of a swap
         self._lock = threading.Lock()  # serialises check-then-write in this process
 
     # ------------------------------------------------------------ reads (never solve)
@@ -230,6 +249,7 @@ class PlanWorkflowService:
             pantry=pantry,
             snapshot=stamped,
             changes=changes,
+            replaced_swaps=self._replaced_swaps(plan_id, changes),
         )
         self._repo.save_proposal(proposal)
         return proposal
@@ -306,10 +326,126 @@ class PlanWorkflowService:
             previous = self._repo.get_revision(plan_id, plan.current_revision - 1)
             assert previous is not None
             restored = stamp_revision(previous.snapshot, plan.current_revision + 1, previous.pantry)
-            self._recheck_restored(previous, restored)
+            self._warn_if_rule_breaking(previous, restored)
             return self._append(
                 plan, restored, previous.pantry, previous.input_basis, "undo", retry_id, fp, None
             )
+
+    # ------------------------------------------------------------ swaps (phase 5)
+
+    def list_swap_variants(self) -> list[SwapVariant]:
+        """Every catalog variant a slot can be swapped to (current planner inputs)."""
+        return list_swap_variants(self._read_inputs())
+
+    def preview_swap(
+        self, plan_id: str, slot_id: str, variant_id: str, scope: str, expected_revision: int
+    ) -> SwapPreview:
+        """Stateless: what a swap would change. Stores nothing and never blocks on rules."""
+        plan, current = self._current(self._plan(plan_id))
+        self._check_expected(expected_revision, plan.current_revision)
+        inputs = self._read_inputs()
+        candidate = self._swapped(plan, current, slot_id, variant_id, scope, inputs)
+        return SwapPreview(
+            plan_id=plan_id,
+            base_revision=plan.current_revision,
+            changes=diff_snapshots(current.snapshot, candidate),
+            grocery_delta=tuple(
+                grocery_delta(current.snapshot.shopping_list, candidate.shopping_list)
+            ),
+            rule_warnings=self._rule_warnings(candidate, inputs),
+            trip=self._trip_impact(plan_id, candidate),
+        )
+
+    def swap(
+        self,
+        plan_id: str,
+        slot_id: str,
+        variant_id: str,
+        scope: str,
+        expected_revision: int,
+        retry_id: str,
+    ) -> SwapOutcome:
+        """Append exactly one revision with the swap (or none when it changes nothing)."""
+        fp = fingerprint("swap", plan_id, slot_id, variant_id, scope, expected_revision)
+        with self._lock:
+            replay = self._replay(plan_id, retry_id, fp)
+            if replay is not None:
+                stored = self._repo.get_revision(plan_id, replay.revision)
+                assert stored is not None
+                return SwapOutcome(
+                    replay, stored.snapshot, self._rule_warnings(stored.snapshot, self._read_inputs())
+                )
+            plan, current = self._current(self._plan(plan_id))
+            self._check_expected(expected_revision, plan.current_revision)
+            inputs = self._read_inputs()
+            candidate = self._swapped(plan, current, slot_id, variant_id, scope, inputs)
+            if candidate is current.snapshot:
+                self._repo.save_retry(
+                    RetryRecord(plan_id, retry_id, fp, plan.current_revision, changed=False)
+                )
+                result = MutationResult(
+                    plan_id, plan.current_revision, current.snapshot.plan["snapshot_id"], False
+                )
+            else:
+                result = self._append(
+                    plan, candidate, current.pantry, input_basis(inputs), "swap", retry_id, fp, None
+                )
+            return SwapOutcome(result, candidate, self._rule_warnings(candidate, inputs))
+
+    def _swapped(
+        self,
+        plan: WeeklyPlan,
+        current: PlanRevision,
+        slot_id: str,
+        variant_id: str,
+        scope: str,
+        inputs: PlannerInputs,
+    ) -> PlanSnapshot:
+        """The validated swap candidate stamped as the next revision, or the current snapshot
+        itself when the swap changes nothing."""
+        if scope not in SCOPES:
+            raise InvalidRequest(f"scope must be one of {', '.join(SCOPES)}")
+        slot = find_slot(current.snapshot, slot_id)  # SlotNotFound
+        variant = catalog_variants(inputs).get(variant_id)
+        if variant is None:
+            raise VariantNotFound(variant_id)
+        if date.fromisoformat(slot["date"]) < self._today():
+            raise SlotNotEditable("meals before today cannot be swapped")
+        swapped = apply_swap(current.snapshot, slot_id, variant, scope, inputs, current.pantry)
+        if content_equal(current.snapshot, swapped):
+            return current.snapshot
+        # Groceries use the base revision's captured pantry, never the current one.
+        return stamp_revision(swapped, plan.current_revision + 1, current.pantry)
+
+    @staticmethod
+    def _rule_warnings(snapshot: PlanSnapshot, inputs: PlannerInputs) -> tuple[JsonObject, ...]:
+        return tuple(
+            {"rule": v.rule, "message": v.message} for v in check_weekly_rules(snapshot, inputs)
+        )
+
+    def _trip_impact(self, plan_id: str, swapped: PlanSnapshot) -> JsonObject | None:
+        """The shopping trip holding the week; a done trip also lists what is newly needed."""
+        if self._trips is None:
+            return None
+        trip = next((t for t in self._trips.list() if plan_id in t.plan_ids), None)
+        if trip is None:
+            return None
+        extra: list[JsonObject] = []
+        if trip.status == DONE:
+            week = next(w for w in trip.weeks if w.plan_id == plan_id)
+            covered = (
+                self._repo.get_revision(plan_id, week.covered_revision)
+                if week.covered_revision is not None
+                else None
+            )
+            if covered is not None:
+                extra = extra_needed(covered.snapshot.shopping_list, swapped.shopping_list)
+        return {
+            "trip_id": trip.trip_id,
+            "name": trip.display_name,
+            "status": trip.status,
+            "extra_needed": extra,
+        }
 
     # ------------------------------------------------------------ internals
 
@@ -334,22 +470,21 @@ class PlanWorkflowService:
             self._repo.delete_proposal(proposal_id)
         return MutationResult(plan.plan_id, new_rev, snapshot.plan["snapshot_id"], True)
 
-    def _recheck_restored(self, previous: PlanRevision, restored: PlanSnapshot) -> None:
-        """Undo restores historical content. If the inputs are unchanged since that revision,
-        the content must still satisfy the rules (a stored violation is a bug: refuse). If
-        recipes, rules or pantry changed, the old content was valid under the old inputs: it is
-        restored as-is and any violation under the current rules is only logged."""
-        inputs = self._read_inputs()
-        if input_basis(inputs) == previous.input_basis:
-            require_weekly_rules(restored, inputs)
-            return
-        violations = check_weekly_rules(restored, inputs)
+    def _warn_if_rule_breaking(self, previous: PlanRevision, restored: PlanSnapshot) -> None:
+        """Undo restores historical content, which may be a swapped week: weekly rules are
+        advisory there (phase 5), so violations are only logged and never refuse the undo."""
+        violations = check_weekly_rules(restored, self._read_inputs())
         if violations:
             logger.warning(
-                "undo of %s restores content that breaks current rules: %s",
+                "undo of %s restores content that breaks weekly rules: %s",
                 previous.plan_id,
                 "; ".join(f"{v.rule}: {v.message}" for v in violations),
             )
+
+    def _replaced_swaps(self, plan_id: str, changes: tuple[SlotChange, ...]) -> int:
+        """How many hand-swapped slots of the current revision the changes would replace."""
+        swapped = swapped_assignment_ids(self._repo.list_revisions(plan_id))
+        return sum(1 for c in changes if c.assignment_id in swapped)
 
     def _replay(self, plan_id: str, retry_id: str, fp: str) -> MutationResult | None:
         if not retry_id:

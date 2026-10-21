@@ -27,7 +27,7 @@ const WEEKEND_COPY = {
   }
 };
 
-export function WeekGrid({ plan, onSelect, highlightIds }) {
+export function WeekGrid({ plan, onSelect, highlightIds, onSwap = null, today = null }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
       {Object.keys(DAYS).map(day => (
@@ -71,6 +71,7 @@ export function WeekGrid({ plan, onSelect, highlightIds }) {
                     slot={slot}
                     highlighted={highlightIds?.has(dto.assignment_id)}
                     onClick={() => onSelect(slot)}
+                    onSwap={onSwap && today && dto.date >= today ? () => onSwap(slot) : null}
                   />
                 );
               })

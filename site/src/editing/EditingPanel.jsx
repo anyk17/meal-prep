@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarPlus, History, RefreshCw, Undo2, Check, X, CalendarRange } from 'lucide-react';
 import { createPlanEditor } from './planEditor.js';
 import { formatMonth, todayIn } from '../dates.js';
+import { replacedSwapsWarning } from './swapModel.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE_PATH || '/api/v1';
 const btn = 'px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
@@ -29,7 +30,7 @@ function Problem({ problem, busy, cooldown, onRefresh, onRegenerate, onDismiss }
   } else if (code === 'generation_busy') {
     body = cooldown > 0 ? `The planner is busy. Try again in ${cooldown} s.` : 'The planner is busy. You can try again now.';
   } else if (code === 'week_not_editable') {
-    body = 'Weeks that have started or passed are read-only. Only future weeks can be regenerated or reverted.';
+    body = 'Weeks that have started or passed cannot be regenerated. You can still swap meals from today on.';
   } else if (code === 'rule_violation') {
     body = 'The generated plan breaks weekly rules, so nothing was saved:';
   } else if (code === 'duplicate_week') {
@@ -52,6 +53,7 @@ function Problem({ problem, busy, cooldown, onRefresh, onRegenerate, onDismiss }
 
 function ProposalReview({ proposal, busy, onAccept, onDiscard }) {
   const { changes, identical } = proposal;
+  const swapWarning = replacedSwapsWarning(proposal);
   return (
     <section aria-label="Proposal review" className="rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/20 p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -64,6 +66,7 @@ function ProposalReview({ proposal, busy, onAccept, onDiscard }) {
           <button className={btnQuiet} disabled={busy} onClick={onDiscard}><X size={14} className="inline mr-1" />Discard</button>
         </div>
       </div>
+      {swapWarning && <p role="note" className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100 px-3 py-2 text-sm">{swapWarning} Accepting is still allowed.</p>}
       {identical && <p className="text-sm text-slate-700 dark:text-slate-300">This proposal is identical to the current plan, so there is nothing to accept. Discard it and regenerate for another variation.</p>}
       {!identical && (
         <ul className="text-sm space-y-1" aria-label="Changes">
@@ -146,7 +149,8 @@ export default function EditingPanel({ weekStart, plan, review, onReview, onRelo
   const weekEnd = new Date(Date.parse(`${weekStart}T00:00:00Z`) + 6 * 86400000).toISOString().slice(0, 10);
   const canCreate = !plan && weekEnd >= today;
   const canRegenerate = !!plan && plan.week_start > today;
-  const canUndo = canRegenerate && plan.revision > 1;
+  // Undo also works in the started week, so a swap made today can be reverted.
+  const canUndo = !!plan && weekEnd >= today && plan.revision > 1;
   const month = weekStart.slice(0, 7);
   const isBusy = busy !== null;
   const planKey = plan ? `${plan.plan_id}:${plan.revision}:${plan.snapshot_id}` : null;
@@ -205,7 +209,7 @@ export default function EditingPanel({ weekStart, plan, review, onReview, onRelo
         {canRegenerate && !review && <button className={btnPrimary} disabled={disableGenerate} onClick={propose}><RefreshCw size={14} className="inline mr-1" />{busy === 'propose' ? 'Generating proposal…' : 'Regenerate'}</button>}
         {canUndo && !review && !confirmUndo && <button className={btnQuiet} disabled={isBusy} onClick={() => setConfirmUndo(true)}><Undo2 size={14} className="inline mr-1" />Undo last change</button>}
         <button className={btnQuiet} disabled={disableGenerate} onClick={fill}><CalendarRange size={14} className="inline mr-1" />{busy === 'fill' ? `Generating ${formatMonth(month)}…` : `Generate ${formatMonth(month)}`}</button>
-        {plan && !canRegenerate && <span className="text-xs text-slate-500 dark:text-slate-400">This week has started, so it is read-only.</span>}
+        {plan && !canRegenerate && <span className="text-xs text-slate-500 dark:text-slate-400">This week has started: you can swap meals from today on, but not regenerate it.</span>}
       </div>
 
       {busy === 'fill' && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">Generating missing weeks one at a time. This can take a minute; keep this page open.</p>}

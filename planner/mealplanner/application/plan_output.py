@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from ..domain.catalog import ProteinType
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.solution import MealPlanSolution
+from ..domain.variants import materialize_variant
 
 
 class IngredientItem(BaseModel):
@@ -75,63 +76,27 @@ def build_plan_output(
         day = parts[0]
         meal = parts[1]
         
-        # Track protein
+        content = materialize_variant(
+            variant, meal, inputs.rules, inputs.ingredients
+        )
         pt = variant.recipe.tags.primary_protein
         protein_counts[pt.value] += 1
-        
-        # Resolve protein quantity
-        protein_portions = inputs.rules.protein_portions_g[pt]
-        protein_qty = getattr(protein_portions, meal, 0)
-        
-        # Track carb and resolve carb quantity
-        carb = "none"
-        carb_qty = None
-        if variant.carb_ingredient_id:
-            carb = variant.carb_ingredient_id
+        carb = content.carb or "none"
+        if content.carb:
             carb_counts[carb] = carb_counts.get(carb, 0) + 1
-            # Get carb quantity from ingredients.yml
-            if carb in inputs.ingredients:
-                carb_qty = inputs.ingredients[carb].default_qty_g or 0
-        
-        # Build ingredients list
-        ingredients_list = []
-        for ing in variant.recipe.ingredients:
-            if ing.item not in inputs.ingredients:
-                continue
-            
-            ingredient_def = inputs.ingredients[ing.item]
-            
-            # Resolve quantity
-            if ing.qty == "@portion":
-                qty = protein_qty
-            elif ing.qty_g is not None:
-                qty = ing.qty_g
-            elif ing.qty_ml is not None:
-                qty = ing.qty_ml
-            elif ing.qty_units is not None:
-                qty = ing.qty_units
-            else:
-                qty = 0
-            
-            ingredients_list.append(IngredientItem(
-                item=ing.item,
-                display=ingredient_def.display,
-                qty=qty,
-                unit=ingredient_def.unit,
-                role=ing.role
-            ))
-        
-        # Add carb ingredient if present
-        if variant.carb_ingredient_id and variant.carb_ingredient_id in inputs.ingredients:
-            carb_def = inputs.ingredients[variant.carb_ingredient_id]
-            ingredients_list.append(IngredientItem(
-                item=variant.carb_ingredient_id,
-                display=carb_def.display,
-                qty=carb_qty or 0,
-                unit=carb_def.unit,
-                role="carb"
-            ))
-            
+        protein_qty = content.protein_qty
+        carb_qty = content.carb_qty
+        ingredients_list = [
+            IngredientItem(
+                item=line.item,
+                display=line.display,
+                qty=line.qty,
+                unit=line.unit,
+                role=line.role,
+            )
+            for line in content.ingredients
+        ]
+
         # Check if this is a dinner slot extended from lunch
         is_extended = (
             meal == "dinner"

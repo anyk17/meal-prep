@@ -89,7 +89,11 @@ def _build_workflow_service(
     solver_timeout_seconds: float | None,
     proposal_ttl: timedelta | None,
 ) -> Any:
-    from ...adapters.sqlite.store import SqlitePlannerInputReader, SqlitePlanRepository
+    from ...adapters.sqlite.store import (
+        SqlitePlannerInputReader,
+        SqlitePlanRepository,
+        SqliteShoppingTripRepository,
+    )
     from ...adapters.ortools import OrToolsPlanGenerator
     from ...application.plan_workflows import DEFAULT_PROPOSAL_TTL, PlanWorkflowService
 
@@ -106,6 +110,7 @@ def _build_workflow_service(
         generator=plan_generator,
         timezone=zone,
         proposal_ttl=proposal_ttl or DEFAULT_PROPOSAL_TTL,
+        trips=SqliteShoppingTripRepository(db_path),
     )
 
 

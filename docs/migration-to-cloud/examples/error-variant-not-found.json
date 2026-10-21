@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "variant_not_found",
+    "details": [],
+    "message": "The catalog has no recipe variant with that variant_id."
+  }
+}

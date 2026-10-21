@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "carb": "rice",
+      "name": "Arroz con pollo",
+      "protein": "chicken",
+      "recipe_id": "arroz_con_pollo",
+      "variant_id": "arroz_con_pollo__carb_rice"
+    },
+    {
+      "carb": null,
+      "name": "At\u00fan a la JuanFe",
+      "protein": "fish",
+      "recipe_id": "atun_juanfe",
+      "variant_id": "atun_juanfe__carb_none"
+    },
+    {
+      "carb": "rice",
+      "name": "At\u00fan a la JuanFe",
+      "protein": "fish",
+      "recipe_id": "atun_juanfe",
+      "variant_id": "atun_juanfe__carb_rice"
+    },
+    {
+      "carb": null,
+      "name": "Pollo asi\u00e1tico",
+      "protein": "chicken",
+      "recipe_id": "pollo_asiatico",
+      "variant_id": "pollo_asiatico__carb_none"
+    },
+    {
+      "carb": "rice",
+      "name": "Pollo asi\u00e1tico",
+      "protein": "chicken",
+      "recipe_id": "pollo_asiatico",
+      "variant_id": "pollo_asiatico__carb_rice"
+    }
+  ]
+}

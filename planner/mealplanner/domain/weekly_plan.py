@@ -100,7 +100,7 @@ class PlanRevision:
     pantry: tuple[str, ...]
     input_basis: str
     created_at: datetime
-    source: str  # "create" | "regenerate" | "undo"
+    source: str  # "import" | "create" | "regenerate" | "swap" | "undo"
 
 
 @dataclass(frozen=True)
@@ -140,6 +140,8 @@ class Proposal:
     pantry: tuple[str, ...]
     snapshot: PlanSnapshot  # complete candidate content, already stamped base_revision + 1
     changes: tuple[SlotChange, ...]
+    # Slots swapped by hand since the last generated revision that this proposal would replace.
+    replaced_swaps: int = 0
 
     @property
     def is_identical(self) -> bool:

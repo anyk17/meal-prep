@@ -103,7 +103,7 @@ test('fillMonth, revisions, and discard use the documented endpoints', async () 
     const editor = createPlanEditor();
     assert.equal((await editor.fillMonth('2026-11')).weeks.length, 6);
     assert.deepEqual(mock.calls[0].body, {});
-    assert.equal((await editor.listRevisions(revisions.plan_id)).items.length, 3);
+    assert.equal((await editor.listRevisions(revisions.plan_id)).items.length, revisions.items.length);
     await editor.discardProposal(revisions.plan_id, 'p1');
     assert.equal(mock.calls[2].method, 'DELETE');
     await assert.rejects(editor.fillMonth('2026-13'), { code: 'invalid_request' });

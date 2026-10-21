@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "slot_not_found",
+    "details": [],
+    "message": "This plan has no meal slot with that slot_id."
+  }
+}

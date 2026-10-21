@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Utensils } from 'lucide-react';
 
-export function RecipeModal({ slot, onClose }) {
+export function RecipeModal({ slot, onClose, onSwap = null }) {
     if (!slot) return null;
 
     const { recipeName, protein, carb, meal, day, proteinQty, proteinUnit, carbQty, carbUnit, ingredients } = slot;
@@ -68,7 +68,15 @@ export function RecipeModal({ slot, onClose }) {
                     </div>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-slate-800/50 px-6 py-4 flex justify-end border-t border-gray-100 dark:border-slate-800">
+                <div className="bg-gray-50 dark:bg-slate-800/50 px-6 py-4 flex justify-end gap-2 border-t border-gray-100 dark:border-slate-800">
+                    {onSwap && (
+                        <button
+                            onClick={onSwap}
+                            className="px-4 py-2 min-h-11 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white rounded-lg font-medium text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                            Swap
+                        </button>
+                    )}
                     <button
                         onClick={onClose}
                         className="px-4 py-2 bg-slate-900 dark:bg-slate-700 text-white rounded-lg font-medium text-sm hover:bg-slate-800 dark:hover:bg-slate-600 transition-colors"

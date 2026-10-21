@@ -1,9 +1,10 @@
 """Recipe variant expansion."""
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import Mapping, Optional
 from pydantic import BaseModel
 
-from .catalog import Recipe, CarbStrategy, IngredientKind, Ingredient
+from .catalog import Recipe, CarbStrategy, IngredientKind, Ingredient, Rules
 
 
 class RecipeVariant(BaseModel):
@@ -86,3 +87,70 @@ def expand_variants(
             )
 
     return variants
+
+
+@dataclass(frozen=True)
+class IngredientLine:
+    """One resolved ingredient row of a materialized slot."""
+
+    item: str
+    display: str
+    qty: float
+    unit: str
+    role: str
+
+
+@dataclass(frozen=True)
+class MaterializedSlot:
+    """A variant resolved for one meal: portions, carb and the full ingredient rows."""
+
+    protein: str
+    protein_qty: float
+    carb: Optional[str]  # carb ingredient id, None when the variant has no carb
+    carb_qty: Optional[float]
+    ingredients: tuple[IngredientLine, ...]
+
+
+def materialize_variant(
+    variant: RecipeVariant,
+    meal: str,
+    rules: Rules,
+    ingredients: Mapping[str, Ingredient],
+) -> MaterializedSlot:
+    """Resolve a variant for a meal into protein/carb quantities and ingredient rows.
+
+    The single place that decides how a variant becomes slot content; generation output
+    (plan_output.py) and manual swaps (swap.py) both use it.
+    """
+    pt = variant.recipe.tags.primary_protein
+    protein_qty = getattr(rules.protein_portions_g[pt], meal, 0)
+
+    carb: Optional[str] = None
+    carb_qty: Optional[float] = None
+    if variant.carb_ingredient_id:
+        carb = variant.carb_ingredient_id
+        if carb in ingredients:
+            carb_qty = ingredients[carb].default_qty_g or 0
+
+    lines: list[IngredientLine] = []
+    for ing in variant.recipe.ingredients:
+        if ing.item not in ingredients:
+            continue
+        definition = ingredients[ing.item]
+        if ing.qty == "@portion":
+            qty = protein_qty
+        elif ing.qty_g is not None:
+            qty = ing.qty_g
+        elif ing.qty_ml is not None:
+            qty = ing.qty_ml
+        elif ing.qty_units is not None:
+            qty = ing.qty_units
+        else:
+            qty = 0
+        lines.append(IngredientLine(ing.item, definition.display, qty, definition.unit, ing.role))
+
+    if carb and carb in ingredients:
+        carb_def = ingredients[carb]
+        lines.append(IngredientLine(carb, carb_def.display, carb_qty or 0, carb_def.unit, "carb"))
+
+    return MaterializedSlot(pt.value, protein_qty, carb, carb_qty, tuple(lines))

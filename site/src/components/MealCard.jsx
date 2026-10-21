@@ -22,7 +22,7 @@ const PROTEIN_ICONS = {
     default: Utensils
 };
 
-export function MealCard({ slot, onClick, highlighted = false }) {
+export function MealCard({ slot, onClick, highlighted = false, onSwap = null }) {
     const { recipeName, protein, carb, meal, proteinQty, proteinUnit, carbQty, carbUnit } = slot;
 
     const colorClass = PROTEIN_COLORS[protein] || PROTEIN_COLORS.default;
@@ -60,6 +60,16 @@ export function MealCard({ slot, onClick, highlighted = false }) {
                     </div>
                 )}
             </div>
+            {onSwap && (
+                <button
+                    type="button"
+                    onClick={event => { event.stopPropagation(); onSwap(); }}
+                    aria-label={`Swap ${recipeName}`}
+                    className="min-h-11 mt-1 w-full rounded-md border border-current/30 bg-white/60 dark:bg-slate-900/40 text-xs font-semibold hover:bg-white/90 dark:hover:bg-slate-900/70"
+                >
+                    Swap
+                </button>
+            )}
         </div>
     );
 }

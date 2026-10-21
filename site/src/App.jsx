@@ -23,6 +23,7 @@ const INITIAL_WEEK = mondayOf(import.meta.env.VITE_DEFAULT_FROM || '2026-10-19')
 const loadEditor = import.meta.env.VITE_READER_MODE === 'static' ? null : () => import('./editing/planEditor.js');
 const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx'));
 const TripControls = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx'));
+const SwapDialog = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/SwapDialog.jsx'));
 const CreateTripBar = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx').then(module => ({ default: module.CreateTripBar })));
 const MonthFill = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx').then(module => ({ default: module.MonthFill })));
 
@@ -60,6 +61,8 @@ function App() {
   const [tripNonce, setTripNonce] = useState(0);
   const [selectedPlans, setSelectedPlans] = useState([]);
   const [review, setReview] = useState(null);
+  const [swapSlot, setSwapSlot] = useState(null);
+  const [swapNotice, setSwapNotice] = useState(null);
   const [view, setView] = useState('week');
   const [month, setMonth] = useState(monthOf(INITIAL_WEEK));
   const [monthNonce, setMonthNonce] = useState(0);
@@ -136,7 +139,7 @@ function App() {
   const goToWeek = target => {
     if (target === weekStart) return;
     hasPlan.current = false;
-    setReview(null); setPlan(null); setShoppingList(null); setError(null); setSelectedSlot(null);
+    setReview(null); setPlan(null); setShoppingList(null); setError(null); setSelectedSlot(null); setSwapSlot(null); setSwapNotice(null);
     setWeekStart(target);
   };
   const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
@@ -294,7 +297,23 @@ function App() {
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">{review ? 'Proposed Plan' : 'Weekly Plan'}</h2>
             </div>
 
-            <WeekGrid plan={shown} onSelect={setSelectedSlot} highlightIds={highlightIds} />
+            {swapNotice && swapNotice.revision === plan?.revision && (
+              <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-100 px-4 py-3 text-sm">
+                <div className="space-y-1">
+                  <p>{swapNotice.text} Use "Undo last change" above to revert.</p>
+                  {swapNotice.warnings.length > 0 && (
+                    <div className="text-amber-800 dark:text-amber-200">
+                      <p>Heads-up: this week now breaks some planning rules (informational only):</p>
+                      <ul className="list-disc pl-5">{swapNotice.warnings.map(w => <li key={`${w.rule}:${w.message}`}>{w.message}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+                <button className="min-h-8 px-2 underline" onClick={() => setSwapNotice(null)}>Dismiss</button>
+              </div>
+            )}
+
+            <WeekGrid plan={shown} onSelect={setSelectedSlot} highlightIds={highlightIds}
+              onSwap={canEdit && SwapDialog && !review ? slot => { setSwapNotice(null); setSwapSlot(slot); } : null} today={todayIn(plan?.timezone)} />
 
             {/* Stats Summary */}
             <div className="mt-12 bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 transition-colors duration-200">
@@ -340,7 +359,20 @@ function App() {
         <RecipeModal
           slot={selectedSlot}
           onClose={() => setSelectedSlot(null)}
+          onSwap={canEdit && SwapDialog && !review && selectedSlot.date >= todayIn(plan?.timezone) ? () => { setSwapSlot(selectedSlot); setSelectedSlot(null); setSwapNotice(null); } : null}
         />
+      )}
+      {swapSlot && SwapDialog && plan && (
+        <Suspense fallback={null}>
+          <SwapDialog slot={swapSlot} plan={plan} onClose={() => setSwapSlot(null)} onReload={() => loadData()}
+            onApplied={async ({ variant, ruleWarnings, revision }) => {
+              const name = variant.name;
+              setSwapSlot(null);
+              await loadData();
+              setSwapNotice({ text: `Swapped to ${name}.`, warnings: ruleWarnings, revision });
+              setTripNonce(value => value + 1);
+            }} />
+        </Suspense>
       )}
     </div>
   );

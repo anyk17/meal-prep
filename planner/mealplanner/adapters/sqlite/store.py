@@ -144,6 +144,7 @@ def _proposal_body(p: Proposal) -> str:
             "pantry": list(p.pantry),
             "snapshot": {"plan": p.snapshot.plan, "shopping_list": p.snapshot.shopping_list},
             "changes": [_change_to_json(c) for c in p.changes],
+            "replaced_swaps": p.replaced_swaps,
         }
     )
 
@@ -164,6 +165,7 @@ def _proposal_from_row(row: sqlite3.Row) -> Proposal:
             plan=body["snapshot"]["plan"], shopping_list=body["snapshot"]["shopping_list"]
         ),
         changes=tuple(SlotChange(**c) for c in body["changes"]),
+        replaced_swaps=body.get("replaced_swaps", 0),
     )
 
 

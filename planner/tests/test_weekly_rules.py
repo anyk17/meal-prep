@@ -367,7 +367,7 @@ def test_undo_restores_valid_history_when_inputs_unchanged() -> None:
     assert svc.undo(plan_id, 2, "u1").revision == 3
 
 
-def test_undo_refuses_corrupt_history_when_inputs_unchanged() -> None:
+def test_undo_allows_rule_violating_history_when_inputs_unchanged() -> None:
     svc, repo, _, plan_id = accepted_revision_two()
     stored = repo._revisions[(plan_id, 1)]
     bad_plan = copy.deepcopy(stored.snapshot.plan)
@@ -375,9 +375,9 @@ def test_undo_refuses_corrupt_history_when_inputs_unchanged() -> None:
     repo._revisions[(plan_id, 1)] = dataclasses.replace(
         stored, snapshot=PlanSnapshot(bad_plan, stored.snapshot.shopping_list)
     )
-    with pytest.raises(RuleViolationError):
-        svc.undo(plan_id, 2, "u1")
-    assert svc.get_current(plan_id).revision == 2
+    # weekly rules are advisory for undo (phase 5): the violating revision is restored
+    assert svc.undo(plan_id, 2, "u1").revision == 3
+    assert svc.get_current(plan_id).revision == 3
 
 
 def test_undo_reports_but_does_not_block_when_inputs_changed(caplog) -> None:

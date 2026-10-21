@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: |-
     Versioned API for dated weekly meal plans and their current shopping snapshots.
-    Reads are always available. Plan changes (create, propose, accept, discard, undo)
+    Reads are always available. Plan changes (create, propose, accept, discard, undo, swap)
     and revision history need a SQLite-backed server and a loopback client; the server
     rejects them otherwise (403 forbidden or read_only). Static publication stays
     read-only. This development API is intended to bind to loopback. It has no
@@ -19,6 +19,8 @@ tags:
     description: Dated weekly plans, their grocery snapshots, and revision history.
   - name: Proposals
     description: Preview, accept, discard, and undo plan changes.
+  - name: Swaps
+    description: Replace the recipe variant of a dated slot (weekly rules are advisory) and list the variants a slot can take.
   - name: Shopping trips
     description: Shopping trips (called shopping lists in the UI) that cover weekly plans, and week coverage.
   - name: Capabilities
@@ -633,7 +635,8 @@ paths:
       description: |-
         Appends revision N + 1 whose content equals revision N - 1; history is never
         deleted. Undoing twice therefore returns to the later content. Idempotency-Key
-        semantics match accept. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        semantics match accept. Weekly rules are advisory for undo: restoring a revision that
+        violates them (for example a swapped week) is allowed and never refused. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -687,7 +690,7 @@ paths:
                   summary: Plan is at revision 1
                   externalValue: examples/error-nothing-to-undo.json
         '422':
-          description: The Idempotency-Key was used for a different request (retry_id_reused), or the content to commit breaks weekly rules (rule_violation); nothing was stored.
+          description: The Idempotency-Key was used for a different request (retry_id_reused); nothing was stored.
           headers:
             Cache-Control:
               description: Responses are not stored by caches.
@@ -702,9 +705,259 @@ paths:
                 reusedKey:
                   summary: Same key, different request
                   externalValue: examples/error-retry-id-reused.json
-                ruleViolation:
-                  summary: A candidate broke weekly rules; nothing stored
-                  externalValue: examples/error-rule-violation.json
+
+  /api/v1/catalog/variants:
+    get:
+      tags: [Swaps]
+      operationId: listSwapVariants
+      summary: List every recipe variant a slot can be swapped to
+      description: |-
+        Reads the current planner inputs (recipes and ingredients), not any plan. Every
+        recipe variant is listed, whatever meal it suits: weekly rules are advisory for
+        swaps. name is the display name plans show for that variant (recipe_name in a
+        slot). carb is the carb ingredient ID or null. Sorted by name, then variant_id.
+        Open read like the other reads, but it needs the SQLite-backed API: in JSON
+        snapshot mode (no planner inputs) it returns 503 source_unavailable.
+      responses:
+        '200':
+          description: The swappable variants.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapVariantList'
+              examples:
+                variants:
+                  summary: A few variants (the real list has every catalog variant)
+                  externalValue: examples/swap-variants.json
+        '503':
+          $ref: '#/components/responses/SourceFailure'
+  /api/v1/plans/{plan_id}/swaps/preview:
+    post:
+      tags: [Swaps]
+      operationId: previewSwap
+      summary: Preview a meal swap without storing anything
+      description: |-
+        Stateless: nothing is stored and no revision is created. Returns the slot changes
+        (same items as a proposal), the week's grocery delta, the weekly-rule violations the
+        swapped plan would have (advisory, never blocking), and the shopping trip impact.
+        scope pair swaps a linked lunch/dinner together and keeps them linked; on an unlinked
+        slot it equals single. scope single swaps only that slot and removes the link from
+        both halves. The swapped-in recipe is not extended to dinner automatically.
+        Groceries use the base revision's captured pantry. grocery_delta lists only changed
+        ingredient/unit rows (before and after are 0 when absent), sorted by section, then
+        display. trip is null when the week is on no shopping trip; otherwise it names the trip
+        and its status. extra_needed is non-empty only for a done trip: the positive quantity
+        differences between the swapped week's groceries and the week's groceries at the
+        revision the trip covered. A swap to the variant already in the slot previews as no
+        change (empty changes and grocery_delta). Only slots dated today or later in the
+        household timezone can be swapped, including slots of a started week. Requires a
+        SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      requestBody:
+        required: true
+        description: The slot, the variant to put there, the scope, and the revision the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwapRequest'
+      responses:
+        '200':
+          description: What the swap would do.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapPreview'
+              examples:
+                openTrip:
+                  summary: Linked pair swapped, week on an open shopping list
+                  externalValue: examples/swap-preview.json
+                doneTrip:
+                  summary: Week on a done shopping list that now needs extra items
+                  externalValue: examples/swap-preview-done-trip.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          description: Unknown plan, slot, or variant.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownPlan:
+                  summary: Unknown plan identifier
+                  externalValue: examples/error-plan-not-found.json
+                unknownSlot:
+                  summary: The plan has no such slot_id
+                  externalValue: examples/error-slot-not-found.json
+                unknownVariant:
+                  summary: The catalog has no such variant_id
+                  externalValue: examples/error-variant-not-found.json
+        '409':
+          description: Stale revision, or the slot is dated before today.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                staleRevision:
+                  summary: expected_revision is behind the current revision
+                  externalValue: examples/error-stale-revision.json
+                slotNotEditable:
+                  summary: The slot is dated before today
+                  externalValue: examples/error-slot-not-editable.json
+  /api/v1/plans/{plan_id}/swaps:
+    post:
+      tags: [Swaps]
+      operationId: applySwap
+      summary: Swap a meal as exactly one new revision
+      description: |-
+        Applies the swap described by POST .../swaps/preview as revision N + 1: the slot (and
+        its linked partner for scope pair) takes the variant's recipe, protein, carb and
+        ingredient quantities; assignment_id, date and meal stay; every other assignment is
+        preserved exactly. Derived counts and groceries are recomputed from the saved
+        assignments and the base revision's captured pantry, under a new snapshot_id. Weekly
+        rules never block a swap: rule_warnings lists the violations the resulting plan has.
+        Responds 201 with the new plan. Swapping a slot to the variant it already has changes
+        nothing and creates no revision: the response is 200 with the current plan. Retrying with
+        the same Idempotency-Key and the same body returns the original result (200, no new
+        revision); the same key with a different body is 422 retry_id_reused. A stale
+        expected_revision is 409 stale_revision. Requires a SQLite-backed API and a loopback
+        client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: The slot, the variant, the scope, and the revision the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwapRequest'
+      responses:
+        '200':
+          description: Nothing changed (the slot already had that variant) or a replay of an earlier request with the same Idempotency-Key. The plan is the revision that request resulted in.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapResult'
+              examples:
+                noop:
+                  summary: Swapped to the variant already there
+                  externalValue: examples/swap-result-noop.json
+        '201':
+          description: The swap was applied as a new revision.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Location:
+              description: Canonical URL of the swapped plan.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapResult'
+              examples:
+                swapped:
+                  summary: Linked pair swapped as revision 2, with a rule warning
+                  externalValue: examples/swap-result.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          description: Unknown plan, slot, or variant.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownPlan:
+                  summary: Unknown plan identifier
+                  externalValue: examples/error-plan-not-found.json
+                unknownSlot:
+                  summary: The plan has no such slot_id
+                  externalValue: examples/error-slot-not-found.json
+                unknownVariant:
+                  summary: The catalog has no such variant_id
+                  externalValue: examples/error-variant-not-found.json
+        '409':
+          description: Stale revision, or the slot is dated before today.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                staleRevision:
+                  summary: expected_revision is behind the current revision
+                  externalValue: examples/error-stale-revision.json
+                slotNotEditable:
+                  summary: The slot is dated before today
+                  externalValue: examples/error-slot-not-editable.json
+        '422':
+          description: The Idempotency-Key was used for a different request (retry_id_reused); nothing was stored.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                reusedKey:
+                  summary: Same key, different request
+                  externalValue: examples/error-retry-id-reused.json
 
   /api/v1/plans/{plan_id}/revisions:
     get:
@@ -1827,7 +2080,7 @@ components:
     Proposal:
       type: object
       additionalProperties: false
-      required: [proposal_id, plan_id, base_revision, base_snapshot_id, seed, created_at, expires_at, identical, changes, plan, shopping_list]
+      required: [proposal_id, plan_id, base_revision, base_snapshot_id, seed, created_at, expires_at, identical, replaced_swaps, changes, plan, shopping_list]
       properties:
         proposal_id:
           type: string
@@ -1857,6 +2110,10 @@ components:
         identical:
           type: boolean
           description: True when accepting would change nothing; plan is then the current content.
+        replaced_swaps:
+          type: integer
+          minimum: 0
+          description: Slots of the current revision changed by manual swaps since the last generated revision (create, regenerate, import) that accepting would replace. Show a warning when above 0.
         changes:
           type: array
           items:
@@ -1865,6 +2122,174 @@ components:
           $ref: '#/components/schemas/Plan'
         shopping_list:
           $ref: '#/components/schemas/ShoppingList'
+    SwapRequest:
+      type: object
+      additionalProperties: false
+      required: [slot_id, variant_id, scope, expected_revision]
+      properties:
+        slot_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The assignment_id of the slot to change.
+        variant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: A variant_id from GET /api/v1/catalog/variants.
+        scope:
+          type: string
+          enum: [pair, single]
+          description: pair swaps a linked lunch/dinner together (an unlinked slot is swapped alone); single swaps only this slot and unlinks the pair.
+        expected_revision:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+    SwapVariant:
+      type: object
+      additionalProperties: false
+      required: [recipe_id, variant_id, name, protein, carb]
+      properties:
+        recipe_id:
+          type: string
+          minLength: 1
+        variant_id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          description: Display name plans show for this variant (the recipe name).
+        protein:
+          type: string
+          enum: [chicken, beef, pork, fish, egg]
+        carb:
+          type: [string, 'null']
+          description: Carb ingredient ID, or null when the variant has no carb.
+    SwapVariantList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Sorted by name, then variant_id.
+          items:
+            $ref: '#/components/schemas/SwapVariant'
+    GroceryDeltaRow:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, display, unit, section, before, after, difference]
+      properties:
+        ingredient_id:
+          type: string
+          minLength: 1
+        display:
+          type: string
+        unit:
+          type: string
+          enum: [g, ml, units]
+        section:
+          type: string
+        before:
+          type: number
+          minimum: 0
+          description: Weekly quantity to buy before the swap (0 when absent).
+        after:
+          type: number
+          minimum: 0
+          description: Weekly quantity to buy after the swap (0 when absent).
+        difference:
+          type: number
+          description: after - before, never 0.
+    RuleWarning:
+      type: object
+      additionalProperties: false
+      required: [rule, message]
+      properties:
+        rule:
+          type: string
+          minLength: 1
+          description: Stable weekly rule code, for example consecutive_same_protein.
+        message:
+          type: string
+    ExtraNeededRow:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, display, unit, quantity]
+      properties:
+        ingredient_id:
+          type: string
+          minLength: 1
+        display:
+          type: string
+        unit:
+          type: string
+          enum: [g, ml, units]
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+    SwapTripImpact:
+      type: object
+      additionalProperties: false
+      required: [trip_id, name, status, extra_needed]
+      properties:
+        trip_id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        status:
+          type: string
+          enum: [open, done]
+        extra_needed:
+          type: array
+          description: Always empty for an open trip (it follows the new revision). For a done trip, what the swapped week needs beyond what the trip covered.
+          items:
+            $ref: '#/components/schemas/ExtraNeededRow'
+    SwapPreview:
+      type: object
+      additionalProperties: false
+      required: [plan_id, base_revision, changes, grocery_delta, rule_warnings, trip]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        base_revision:
+          type: integer
+          minimum: 1
+          description: The current revision the preview was computed against.
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlotChange'
+        grocery_delta:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroceryDeltaRow'
+        rule_warnings:
+          type: array
+          description: Every weekly-rule violation the swapped plan has (advisory).
+          items:
+            $ref: '#/components/schemas/RuleWarning'
+        trip:
+          oneOf:
+            - $ref: '#/components/schemas/SwapTripImpact'
+            - type: 'null'
+          description: The shopping trip holding this week, or null.
+    SwapResult:
+      type: object
+      additionalProperties: false
+      required: [plan, rule_warnings]
+      properties:
+        plan:
+          $ref: '#/components/schemas/Plan'
+        rule_warnings:
+          type: array
+          description: Every weekly-rule violation the resulting plan has (advisory).
+          items:
+            $ref: '#/components/schemas/RuleWarning'
     MutationResult:
       type: object
       additionalProperties: false
@@ -1900,7 +2325,7 @@ components:
           minLength: 1
         source:
           type: string
-          enum: [import, create, regenerate, undo]
+          enum: [import, create, regenerate, swap, undo]
         created_at:
           type: string
           format: date-time
@@ -2100,7 +2525,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week]
+              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week]
             message:
               type: string
             details:
