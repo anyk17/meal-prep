@@ -81,6 +81,58 @@ function ProposalReview({ proposal, busy, onAccept, onDiscard }) {
   );
 }
 
+function FillResult({ result, onDismiss }) {
+  if (!result) return null;
+  return (
+    <section aria-label="Month result" className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-bold text-slate-800 dark:text-white">{formatMonth(result.month)} results</h3>
+        <button className={btnQuiet} onClick={onDismiss}>Dismiss</button>
+      </div>
+      <ul className="space-y-1">
+        {result.weeks.map(week => (
+          <li key={week.week_start} className="flex flex-wrap gap-x-3">
+            <span className="font-mono">{week.week_start} – {week.week_end}</span>
+            <span className={STATUS_STYLE[week.status]}>{STATUS_LABEL[week.status] || week.status}</span>
+            {week.status === 'failed' && week.error && <span className="text-slate-500 dark:text-slate-400">{week.error.message}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// "Generate month" for the month view: the same fill-month write as the week panel, without a selected week.
+export function MonthFill({ month, onReload }) {
+  const editor = useMemo(() => createPlanEditor(API_BASE), []);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState(null);
+  const [result, setResult] = useState(null);
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown(value => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+  const fill = async () => {
+    if (busy) return;
+    setBusy(true); setProblem(null); setResult(null);
+    try { setResult(await editor.fillMonth(month)); await onReload(); }
+    catch (err) {
+      setProblem({ code: err?.code || 'source_unavailable', message: err?.message || 'The request failed.', details: err?.details || [] });
+      if (err?.code === 'generation_busy') setCooldown(err.retryAfter ?? 5);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-3" data-testid="month-editing">
+      <button className={btnQuiet} disabled={busy || cooldown > 0} onClick={fill}><CalendarRange size={14} className="inline mr-1" />{busy ? `Generating ${formatMonth(month)}…` : `Generate ${formatMonth(month)}`}</button>
+      {busy && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">Generating missing weeks one at a time. This can take a minute; keep this page open.</p>}
+      {problem && <Problem problem={problem} busy={busy} cooldown={cooldown} onRefresh={() => { setProblem(null); void onReload(); }} onRegenerate={null} onDismiss={() => setProblem(null)} />}
+      <FillResult result={result} onDismiss={() => setResult(null)} />
+    </div>
+  );
+}
+
 export default function EditingPanel({ weekStart, plan, review, onReview, onReload }) {
   const editor = useMemo(() => createPlanEditor(API_BASE), []);
   const [busy, setBusy] = useState(null);
@@ -172,23 +224,7 @@ export default function EditingPanel({ weekStart, plan, review, onReview, onRelo
 
       {review && <ProposalReview proposal={review} busy={isBusy} onAccept={accept} onDiscard={discard} />}
 
-      {fillResult && (
-        <section aria-label="Month result" className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-bold text-slate-800 dark:text-white">{formatMonth(fillResult.month)} results</h3>
-            <button className={btnQuiet} onClick={() => setFillResult(null)}>Dismiss</button>
-          </div>
-          <ul className="space-y-1">
-            {fillResult.weeks.map(week => (
-              <li key={week.week_start} className="flex flex-wrap gap-x-3">
-                <span className="font-mono">{week.week_start} – {week.week_end}</span>
-                <span className={STATUS_STYLE[week.status]}>{STATUS_LABEL[week.status] || week.status}</span>
-                {week.status === 'failed' && week.error && <span className="text-slate-500 dark:text-slate-400">{week.error.message}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <FillResult result={fillResult} onDismiss={() => setFillResult(null)} />
 
       {revisions && revisions.length > 0 && (
         <details className="text-sm text-slate-600 dark:text-slate-300">

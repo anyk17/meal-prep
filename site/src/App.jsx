@@ -3,11 +3,12 @@ import { MealCard } from './components/MealCard';
 import { ShoppingList } from './components/ShoppingList';
 import { RecipeModal } from './components/RecipeModal';
 import { WeekGrid } from './components/WeekGrid';
+import { MonthView } from './components/MonthView';
 import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createApiReader } from './readers/api';
 import { createStaticReader } from './readers/static';
 import { validatePair, addDays } from './readers/shared.js';
-import { mondayOf, todayIn, formatWeekRange } from './dates.js';
+import { mondayOf, todayIn, formatWeekRange, formatMonth, monthOf } from './dates.js';
 
 const createReader = () => import.meta.env.VITE_READER_MODE === 'static'
   ? createStaticReader('publication/index.json')
@@ -19,6 +20,7 @@ const INITIAL_WEEK = mondayOf(import.meta.env.VITE_DEFAULT_FROM || '2026-10-19')
 // the write client and editing UI are never bundled and cannot be enabled at runtime.
 const loadEditor = import.meta.env.VITE_READER_MODE === 'static' ? null : () => import('./editing/planEditor.js');
 const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx'));
+const MonthFill = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx').then(module => ({ default: module.MonthFill })));
 
 function formatLocalDateTime(value) {
   const date = new Date(value);
@@ -50,6 +52,9 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [review, setReview] = useState(null);
+  const [view, setView] = useState('week');
+  const [month, setMonth] = useState(monthOf(INITIAL_WEEK));
+  const [monthNonce, setMonthNonce] = useState(0);
   const requestGeneration = useRef(0);
   const hasPlan = useRef(false);
   const garbageCollector = getGarbageCollectorLabel();
@@ -127,6 +132,17 @@ function App() {
     setWeekStart(target);
   };
   const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
+  const showMonth = () => { setReview(null); setMonth(monthOf(weekStart)); setView('month'); };
+  const openWeek = target => { if (target === weekStart) void loadData(); else goToWeek(target); setView('week'); };
+  // Month view reads through the shared reader; a static refresh re-pins the publication, then the month reloads.
+  const reloadMonth = async (refresh = false) => {
+    if (refresh) void refreshCapabilities();
+    if (refresh && reader.mode === 'static') {
+      try { const candidate = createReader(); await candidate.refresh(); reader = candidate; setError(null); }
+      catch (err) { setError(err?.message || 'Could not refresh the publication.'); return; }
+    }
+    setMonthNonce(value => value + 1);
+  };
 
   if (!loaded && loading) {
     return (
@@ -176,7 +192,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold leading-none text-slate-900 dark:text-white">Meal Prep</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{actualRange}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{view === 'month' ? formatMonth(month) : actualRange}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -185,7 +201,7 @@ function App() {
               <br />
               <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
-            <button onClick={() => reload(true)} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            <button onClick={() => (view === 'month' ? reloadMonth(true) : reload(true))} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
             <button
               onClick={toggleTheme}
               className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -197,9 +213,22 @@ function App() {
         </div>
       </header>
 
-      {error && plan && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} The displayed plan and groceries are still from the same snapshot.</div>}
+      {error && (plan || view === 'month') && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} {view === 'week' ? 'The displayed plan and groceries are still from the same snapshot.' : 'The month shown is from the last successful load.'}</div>}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <div role="group" aria-label="View" className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-sm">
+          {['week', 'month'].map(name => (
+            <button key={name} aria-pressed={view === name} disabled={!!review && name === 'month'} onClick={() => (name === 'month' ? showMonth() : openWeek(weekStart))}
+              className={`px-4 py-2 capitalize ${view === name ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'} disabled:opacity-50`}>{name}</button>
+          ))}
+        </div>
+
+        {view === 'month' && (
+          <MonthView reader={reader} month={month} onMonth={setMonth} thisMonth={monthOf(todayIn(plan?.timezone))} nonce={monthNonce}
+            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} />
+        )}
+
+        {view === 'week' && <>
         <nav aria-label="Week navigation" className="flex flex-wrap items-center gap-2">
           <button onClick={() => goToWeek(addDays(weekStart, -7))} disabled={!!review} aria-label="Previous week" className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-50"><ChevronLeft size={16} /></button>
           <button onClick={() => goToWeek(thisWeek)} disabled={!!review || weekStart === thisWeek} className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm disabled:opacity-50">This week</button>
@@ -267,6 +296,7 @@ function App() {
           </div>
         </div>
         )}
+        </>}
       </main>
 
       {/* Recipe Modal */}
