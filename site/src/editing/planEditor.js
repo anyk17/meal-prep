@@ -1,7 +1,7 @@
 // Write client for the home (API-mode) deployment only. It is deliberately separate from the
 // read-only reader interface and is only ever imported through a dynamic import that the static
 // (GitHub Pages) build removes.
-import { ReaderError, normalizeError, validatePair } from '../readers/shared.js';
+import { ReaderError, normalizeError, validatePair, validateTrip } from '../readers/shared.js';
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -14,6 +14,15 @@ function requireId(value, label = 'identity') {
 function requireRevision(value) {
   if (!Number.isInteger(value) || value < 1) throw new ReaderError('invalid_request', 'A valid expected revision is required.');
   return value;
+}
+function requireVersion(value) {
+  if (!Number.isInteger(value) || value < 1) throw new ReaderError('invalid_request', 'A valid expected shopping list version is required.');
+  return value;
+}
+function checkTrip(trip, tripId) {
+  validateTrip(trip);
+  if (tripId !== undefined && trip.trip_id !== tripId) throw new ReaderError('source_invalid', 'The API returned a different shopping list.');
+  return trip;
 }
 function newKey() {
   const crypto = globalThis.crypto;
@@ -46,6 +55,7 @@ export function createPlanEditor(base = '/api/v1') {
     let response;
     try { response = await fetch(url(`${path}${endpoint}`), { method, headers, cache: 'no-store', body: body === undefined ? undefined : JSON.stringify(body) }); }
     catch { throw new ReaderError('source_unavailable', 'The meal plan API could not be reached.'); }
+    if (response.status === 204) { settle(); return null; }
     let payload;
     try { payload = await response.json(); }
     catch {
@@ -79,7 +89,7 @@ export function createPlanEditor(base = '/api/v1') {
   return {
     async getCapabilities() {
       const result = await request('GET', '/capabilities');
-      return { canEditPlans: result?.can_edit_plans === true };
+      return { canEditPlans: result?.can_edit_plans === true, canEditShoppingTrips: result?.can_edit_shopping_trips === true };
     },
     async createPlan(weekStart, seed) {
       if (typeof weekStart !== 'string' || !DATE_PATTERN.test(weekStart)) throw new ReaderError('invalid_request', 'A week start date is required.');
@@ -121,6 +131,34 @@ export function createPlanEditor(base = '/api/v1') {
       const result = await request('GET', `/plans/${encodeURIComponent(planId)}/revisions`);
       if (!result || result.plan_id !== planId || !Array.isArray(result.items)) throw new ReaderError('source_invalid', 'The API returned an invalid revision list.');
       return result;
+    },
+    // ---- Shopping trips. Every write carries the trip version the user is looking at; 409 stale_version means refetch. ----
+    async createTrip(planIds, name) {
+      if (!Array.isArray(planIds) || !planIds.length || planIds.length > 60 || new Set(planIds).size !== planIds.length) throw new ReaderError('invalid_request', 'Choose at least one week.');
+      planIds.forEach(id => requireId(id, 'plan identity'));
+      const body = { plan_ids: planIds };
+      if (typeof name === 'string' && name.trim()) body.name = name.trim().slice(0, 80);
+      return checkTrip(await request('POST', '/shopping-trips', { body }));
+    },
+    async addTripWeek(tripId, planId, expectedVersion) {
+      requireId(tripId, 'shopping list identity'); requireId(planId, 'plan identity'); requireVersion(expectedVersion);
+      return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/weeks`, { body: { plan_id: planId, expected_version: expectedVersion } }), tripId);
+    },
+    async removeTripWeek(tripId, planId, expectedVersion) {
+      requireId(tripId, 'shopping list identity'); requireId(planId, 'plan identity'); requireVersion(expectedVersion);
+      return checkTrip(await request('DELETE', `/shopping-trips/${encodeURIComponent(tripId)}/weeks/${encodeURIComponent(planId)}?expected_version=${expectedVersion}`), tripId);
+    },
+    async markTripDone(tripId, expectedVersion) {
+      requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
+      return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/done`, { body: { expected_version: expectedVersion } }), tripId);
+    },
+    async reopenTrip(tripId, expectedVersion) {
+      requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
+      return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/reopen`, { body: { expected_version: expectedVersion } }), tripId);
+    },
+    async deleteTrip(tripId, expectedVersion) {
+      requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
+      await request('DELETE', `/shopping-trips/${encodeURIComponent(tripId)}?expected_version=${expectedVersion}`);
     },
     async fillMonth(month) {
       if (typeof month !== 'string' || !MONTH_PATTERN.test(month)) throw new ReaderError('invalid_request', 'A month in YYYY-MM form is required.');

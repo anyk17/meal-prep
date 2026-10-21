@@ -4,6 +4,8 @@ import { ShoppingList } from './components/ShoppingList';
 import { RecipeModal } from './components/RecipeModal';
 import { WeekGrid } from './components/WeekGrid';
 import { MonthView } from './components/MonthView';
+import { TripsView } from './components/TripsView';
+import { CoverageBadge, WeekCoverage } from './components/CoverageBadge';
 import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createApiReader } from './readers/api';
 import { createStaticReader } from './readers/static';
@@ -20,6 +22,8 @@ const INITIAL_WEEK = mondayOf(import.meta.env.VITE_DEFAULT_FROM || '2026-10-19')
 // the write client and editing UI are never bundled and cannot be enabled at runtime.
 const loadEditor = import.meta.env.VITE_READER_MODE === 'static' ? null : () => import('./editing/planEditor.js');
 const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx'));
+const TripControls = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx'));
+const CreateTripBar = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx').then(module => ({ default: module.CreateTripBar })));
 const MonthFill = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx').then(module => ({ default: module.MonthFill })));
 
 function formatLocalDateTime(value) {
@@ -51,6 +55,10 @@ function App() {
   const [weekStart, setWeekStart] = useState(INITIAL_WEEK);
   const [loaded, setLoaded] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [canEditTrips, setCanEditTrips] = useState(false);
+  const [tripId, setTripId] = useState(null);
+  const [tripNonce, setTripNonce] = useState(0);
+  const [selectedPlans, setSelectedPlans] = useState([]);
   const [review, setReview] = useState(null);
   const [view, setView] = useState('week');
   const [month, setMonth] = useState(monthOf(INITIAL_WEEK));
@@ -120,8 +128,8 @@ function App() {
   // Ask the server whether this client may edit. Hiding controls is not authorization; the server enforces it.
   const refreshCapabilities = useCallback(async () => {
     if (!loadEditor) return;
-    try { const { createPlanEditor } = await loadEditor(); setCanEdit((await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities()).canEditPlans); }
-    catch { setCanEdit(false); }
+    try { const { createPlanEditor } = await loadEditor(); const caps = await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities(); setCanEdit(caps.canEditPlans); setCanEditTrips(caps.canEditShoppingTrips); }
+    catch { setCanEdit(false); setCanEditTrips(false); }
   }, []);
   useEffect(() => { void refreshCapabilities(); }, [refreshCapabilities]);
 
@@ -132,6 +140,9 @@ function App() {
     setWeekStart(target);
   };
   const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
+  const showShopping = () => { setReview(null); setView('shopping'); };
+  const openTrip = id => { setReview(null); setTripId(id); setView('shopping'); };
+  const togglePlan = id => setSelectedPlans(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
   const showMonth = () => { setReview(null); setMonth(monthOf(weekStart)); setView('month'); };
   const openWeek = target => { if (target === weekStart) void loadData(); else goToWeek(target); setView('week'); };
   // Month view reads through the shared reader; a static refresh re-pins the publication, then the month reloads.
@@ -143,6 +154,18 @@ function App() {
     }
     setMonthNonce(value => value + 1);
   };
+
+  const renderWeekAccessory = row => (
+    <>
+      {canEditTrips && CreateTripBar && row.plan && (
+        <label className="inline-flex items-center gap-1.5 min-h-8 text-xs text-slate-600 dark:text-slate-300" title={row.coverage && row.coverage.coverage !== 'not_covered' ? `Already on ${row.coverage.trip_name || 'a shopping list'}` : 'Select for a new shopping list'}>
+          <input type="checkbox" className="w-5 h-5" aria-label={`Select week of ${row.weekStart} for a shopping list`} disabled={row.coverage?.coverage !== 'not_covered'}
+            checked={selectedPlans.includes(row.plan.plan_id)} onChange={() => togglePlan(row.plan.plan_id)} />
+        </label>
+      )}
+      {row.plan && row.coverage && <CoverageBadge coverage={row.coverage} onOpenTrip={openTrip} />}
+    </>
+  );
 
   if (!loaded && loading) {
     return (
@@ -201,7 +224,7 @@ function App() {
               <br />
               <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
-            <button onClick={() => (view === 'month' ? reloadMonth(true) : reload(true))} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            <button onClick={() => (view !== 'week' ? reloadMonth(true) : reload(true))} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
             <button
               onClick={toggleTheme}
               className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -213,19 +236,31 @@ function App() {
         </div>
       </header>
 
-      {error && (plan || view === 'month') && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} {view === 'week' ? 'The displayed plan and groceries are still from the same snapshot.' : 'The month shown is from the last successful load.'}</div>}
+      {error && (plan || view !== 'week') && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} {view === 'week' ? 'The displayed plan and groceries are still from the same snapshot.' : 'What is shown is from the last successful load.'}</div>}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div role="group" aria-label="View" className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-sm">
-          {['week', 'month'].map(name => (
-            <button key={name} aria-pressed={view === name} disabled={!!review && name === 'month'} onClick={() => (name === 'month' ? showMonth() : openWeek(weekStart))}
+          {['week', 'month', 'shopping'].map(name => (
+            <button key={name} aria-pressed={view === name} disabled={!!review && name !== 'week'} onClick={() => (name === 'month' ? showMonth() : name === 'shopping' ? showShopping() : openWeek(weekStart))}
               className={`px-4 py-2 capitalize ${view === name ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'} disabled:opacity-50`}>{name}</button>
           ))}
         </div>
 
         {view === 'month' && (
           <MonthView reader={reader} month={month} onMonth={setMonth} thisMonth={monthOf(todayIn(plan?.timezone))} nonce={monthNonce}
-            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} />
+            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} />
+        )}
+        {view === 'month' && canEditTrips && CreateTripBar && (
+          <Suspense fallback={null}>
+            <CreateTripBar planIds={selectedPlans} reader={reader} onClear={() => setSelectedPlans([])}
+              onCreated={trip => { setSelectedPlans([]); setMonthNonce(value => value + 1); openTrip(trip.trip_id); }}
+              onProblem={() => { setSelectedPlans([]); setMonthNonce(value => value + 1); }} />
+          </Suspense>
+        )}
+
+        {view === 'shopping' && (
+          <TripsView reader={reader} tripId={tripId} onSelect={setTripId} nonce={monthNonce} canEdit={canEditTrips} TripControls={TripControls}
+            onOpenWeek={openWeek} onChanged={() => setTripNonce(value => value + 1)} />
         )}
 
         {view === 'week' && <>
@@ -234,6 +269,7 @@ function App() {
           <button onClick={() => goToWeek(thisWeek)} disabled={!!review || weekStart === thisWeek} className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm disabled:opacity-50">This week</button>
           <button onClick={() => goToWeek(addDays(weekStart, 7))} disabled={!!review} aria-label="Next week" className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-50"><ChevronRight size={16} /></button>
           <span className="text-sm font-medium text-slate-600 dark:text-slate-300 ml-2">{actualRange}</span>
+          {plan && !review && <WeekCoverage reader={reader} plan={plan} nonce={tripNonce + monthNonce} onOpenTrip={openTrip} />}
         </nav>
 
         {canEdit && EditingPanel && loaded && (

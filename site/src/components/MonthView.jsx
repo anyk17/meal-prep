@@ -16,8 +16,16 @@ async function loadMonth(reader, month) {
   // Static: only months in the pinned publication count as published (listPlans has already loaded it).
   const published = reader.mode !== 'static' || isSelectedMonth(month, context?.selected_months);
   if (!published) return { published, rows: [], selectedMonths: context?.selected_months };
-  const plans = await Promise.all(items.map(item => reader.getPlan(item.plan_id)));
-  return { published, rows: buildMonthRows(month, new Map(plans.map(plan => [plan.week_start, plan]))), selectedMonths: context?.selected_months };
+  const [plans, coverage, trips] = await Promise.all([
+    Promise.all(items.map(item => reader.getPlan(item.plan_id))),
+    // Coverage is decoration: if it cannot be read, show no badge rather than a wrong one.
+    reader.getCoverage({ from: first, to: last }).catch(() => null),
+    reader.listShoppingTrips().catch(() => null),
+  ]);
+  const tripNames = new Map((trips?.items ?? []).map(trip => [trip.trip_id, trip.name]));
+  const coverageByPlan = new Map((coverage?.items ?? []).map(item => [item.plan_id, { ...item, trip_name: tripNames.get(item.trip_id) ?? null }]));
+  const rows = buildMonthRows(month, new Map(plans.map(plan => [plan.week_start, plan]))).map(row => ({ ...row, coverage: row.plan && coverage ? coverageByPlan.get(row.plan.plan_id) ?? null : null }));
+  return { published, rows, selectedMonths: context?.selected_months };
 }
 
 function MonthNav({ month, onMonth, thisMonth, selectedMonths, staticMode }) {
@@ -26,18 +34,22 @@ function MonthNav({ month, onMonth, thisMonth, selectedMonths, staticMode }) {
   for (const published of selectedMonths ?? []) years.add(Number(published.slice(0, 4)));
   const tag = value => staticMode && isSelectedMonth(value, selectedMonths) ? ' (published)' : '';
   return (
-    <nav aria-label="Month navigation" className="flex flex-wrap items-center gap-2">
-      <button onClick={() => onMonth(addMonths(month, -12))} aria-label="Previous year" className={cn(nav, 'text-xs font-mono')}>−1y</button>
-      <button onClick={() => onMonth(addMonths(month, -1))} aria-label="Previous month" className={nav}><ChevronLeft size={16} /></button>
-      <select aria-label="Month" value={mon} onChange={event => onMonth(`${year}-${event.target.value}`)} className={control}>
-        {monthsOfYear(year).map(value => <option key={value} value={value.slice(5)}>{monthName(value)}{tag(value)}</option>)}
-      </select>
-      <select aria-label="Year" value={year} onChange={event => onMonth(`${event.target.value}-${mon}`)} className={control}>
-        {[...years].sort().map(value => <option key={value} value={String(value).padStart(4, '0')}>{value}</option>)}
-      </select>
-      <button onClick={() => onMonth(addMonths(month, 1))} aria-label="Next month" className={nav}><ChevronRight size={16} /></button>
-      <button onClick={() => onMonth(addMonths(month, 12))} aria-label="Next year" className={cn(nav, 'text-xs font-mono')}>+1y</button>
-      <button onClick={() => onMonth(thisMonth)} disabled={month === thisMonth} className={control}>This month</button>
+    <nav aria-label="Month navigation" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="flex items-center gap-2">
+        <button onClick={() => onMonth(addMonths(month, -12))} aria-label="Previous year" className={cn(nav, 'text-xs font-mono shrink-0')}>−1y</button>
+        <button onClick={() => onMonth(addMonths(month, -1))} aria-label="Previous month" className={cn(nav, 'shrink-0')}><ChevronLeft size={16} /></button>
+        <select aria-label="Month" value={mon} onChange={event => onMonth(`${year}-${event.target.value}`)} className={cn(control, 'flex-1 min-w-0 sm:flex-none')}>
+          {monthsOfYear(year).map(value => <option key={value} value={value.slice(5)}>{monthName(value)}{tag(value)}</option>)}
+        </select>
+        <button onClick={() => onMonth(addMonths(month, 1))} aria-label="Next month" className={cn(nav, 'shrink-0')}><ChevronRight size={16} /></button>
+        <button onClick={() => onMonth(addMonths(month, 12))} aria-label="Next year" className={cn(nav, 'text-xs font-mono shrink-0')}>+1y</button>
+      </div>
+      <div className="flex items-center gap-2">
+        <select aria-label="Year" value={year} onChange={event => onMonth(`${event.target.value}-${mon}`)} className={cn(control, 'flex-1 min-w-0 sm:flex-none')}>
+          {[...years].sort().map(value => <option key={value} value={String(value).padStart(4, '0')}>{value}</option>)}
+        </select>
+        <button onClick={() => onMonth(thisMonth)} disabled={month === thisMonth} className={cn(control, 'shrink-0')}>This month</button>
+      </div>
     </nav>
   );
 }

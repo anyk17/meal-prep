@@ -8,6 +8,8 @@ import { createStaticReader } from '../src/readers/static.js';
 
 const siteDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureDir = path.resolve(siteDir, '../docs/migration-to-cloud/static-examples');
+// Until the shared fixtures publish shopping_trips, inject an empty list so these tests exercise the strict manifest.
+const withTrips = (file, text) => { if (!file.endsWith('manifest.json')) return text; const m = JSON.parse(text); return JSON.stringify({ shopping_trips: [], ...m }); };
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const populated = path.join(fixtureDir, 'populated');
 const index = readJson(path.join(populated, 'index.json'));
@@ -26,7 +28,7 @@ function installStaticFetch(bundle = populated) {
     const file = path.resolve(root,relative);
     if (!file.startsWith(`${path.resolve(root)}${path.sep}`)) return new Response('',{status:400});
     if (!fs.existsSync(file)) return new Response('',{status:404});
-    return new Response(fs.readFileSync(file,'utf8'),{status:200,headers:{'content-type':'application/json'}});
+    return new Response(withTrips(file,fs.readFileSync(file,'utf8')),{status:200,headers:{'content-type':'application/json'}});
   };
   return () => { globalThis.fetch = original; delete globalThis.window; };
 }
@@ -78,7 +80,7 @@ test('static refresh pins one complete publication and keeps the prior pin on a 
   globalThis.fetch = async input => {
     const url = new URL(input), root = path.resolve(activeBundle), relative = url.pathname.replace('/meal-prep/publication/',''), file = path.resolve(root,relative);
     if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file)) return new Response('',{status:404});
-    return new Response(fs.readFileSync(file,'utf8'),{status:200});
+    return new Response(withTrips(file,fs.readFileSync(file,'utf8')),{status:200});
   };
   try {
     const reader = createStaticReader('publication/index.json','/meal-prep/');
@@ -98,7 +100,7 @@ test('static refresh pins one complete publication and keeps the prior pin on a 
       const url = new URL(input), root = path.resolve(populated), relative = url.pathname.replace('/meal-prep/publication/',''), file = path.resolve(root,relative);
       if (relative.endsWith('/plan.json')) return new Response(JSON.stringify(malformed),{status:200});
       if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file)) return new Response('',{status:404});
-      return new Response(fs.readFileSync(file,'utf8'),{status:200});
+      return new Response(withTrips(file,fs.readFileSync(file,'utf8')),{status:200});
     };
     await assert.rejects(reader.refresh(), error => error.code === 'source_invalid');
     assert.equal(reader.context.publication_id,restoredId);
@@ -116,7 +118,7 @@ test('unsafe paths, mismatched DTOs, and missing files fail without API or legac
   const baseUrl='http://meal.test/meal-prep/publication/';
   documents.set(`${baseUrl}index.json`,{schema_version:1,publication_id:'pub_test',manifest_path:'publications/pub_test/manifest.json'});
   const summary = Object.fromEntries(['plan_id','week_start','week_end','timezone','revision','snapshot_id','generated_at','seed'].map(key=>[key,plan[key]]));
-  documents.set(`${baseUrl}publications/pub_test/manifest.json`,{schema_version:1,publication_id:'pub_test',exported_at:'2026-10-21T15:00:00Z',selected_months:['2026-10'],timezone:'America/Bogota',plans:[{summary,plan_path:'../plan.json',shopping_path:'plans/plan_2026_10_19/shopping-list.json'}]});
+  documents.set(`${baseUrl}publications/pub_test/manifest.json`,{schema_version:1,publication_id:'pub_test',exported_at:'2026-10-21T15:00:00Z',selected_months:['2026-10'],shopping_trips:[],timezone:'America/Bogota',plans:[{summary,plan_path:'../plan.json',shopping_path:'plans/plan_2026_10_19/shopping-list.json'}]});
   globalThis.fetch = async input => { const value=documents.get(String(input)); return value ? new Response(JSON.stringify(value),{status:200}) : new Response('',{status:404}); };
   try {
     const reader=createStaticReader('publication/index.json','/meal-prep/');

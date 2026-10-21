@@ -9,11 +9,13 @@ const siteDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(siteDir, '..');
 const fixtureName = process.env.VITE_STATIC_BUNDLE || 'populated';
 const allowedFixtures = new Set(['populated', 'empty']);
+// An exported publication (db_cli export --out DIR) replaces the example fixtures when set.
+const publicationDir = process.env.VITE_PUBLICATION_DIR;
 
 function publicationPlugin(mode) {
-  const fixtureDir = path.join(repoDir, 'docs/migration-to-cloud/static-examples', fixtureName);
-  if (mode === 'pages' && !allowedFixtures.has(fixtureName)) throw new Error('VITE_STATIC_BUNDLE must be populated or empty.');
-  if (mode === 'pages' && !fs.existsSync(path.join(fixtureDir, 'index.json'))) throw new Error('Selected static publication fixture is missing.');
+  const fixtureDir = publicationDir ? path.resolve(repoDir, publicationDir) : path.join(repoDir, 'docs/migration-to-cloud/static-examples', fixtureName);
+  if (mode === 'pages' && !publicationDir && !allowedFixtures.has(fixtureName)) throw new Error('VITE_STATIC_BUNDLE must be populated or empty.');
+  if (mode === 'pages' && !fs.existsSync(path.join(fixtureDir, 'index.json'))) throw new Error('Selected static publication is missing index.json.');
   return {
     name: 'meal-prep-publication',
     configureServer(server) {

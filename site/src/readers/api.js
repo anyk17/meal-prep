@@ -1,4 +1,4 @@
-import { ReaderError, normalizeError, validatePlan, validateRange, validateShopping, validateSummary } from './shared.js';
+import { ReaderError, normalizeError, validatePlan, validateRange, validateShopping, validateSummary, validateTrip, validateTripList, validateCoverage, validTripId } from './shared.js';
 
 async function request(url) {
   let response;
@@ -11,7 +11,7 @@ async function request(url) {
   }
   if (!response.ok) {
     const error = body?.error;
-    const validCodes = ['invalid_request','plan_not_found','snapshot_changed','source_unavailable','source_invalid'];
+    const validCodes = ['invalid_request','plan_not_found','trip_not_found','snapshot_changed','source_unavailable','source_invalid'];
     if (!error || typeof error.message !== 'string' || !Array.isArray(error.details) || !validCodes.includes(error.code) || error.details.some(detail => !detail || typeof detail.field !== 'string' || typeof detail.message !== 'string')) throw new ReaderError('source_invalid','The API returned an invalid error response.');
     const code = response.status === 409 ? 'snapshot_changed' : error.code;
     throw normalizeError(code, error.message || `API request failed (${response.status}).`, error.details);
@@ -26,6 +26,9 @@ export function createApiReader(base = '/api/v1') {
     mode: 'api', canEditPlans: false,
     async listPlans(range) { validateRange(range); const result = await request(url(`${path}/plans?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)); if (!result || Object.keys(result).join(',') !== 'items' || !Array.isArray(result.items)) throw new ReaderError('source_invalid','Invalid plan list response'); result.items.forEach(validateSummary); if (result.items.some(item=>item.week_start>range.to||item.week_end<range.from)) throw new ReaderError('source_invalid','API returned a plan outside the requested range.'); result.items.sort((a,b)=>a.week_start.localeCompare(b.week_start)); return result; },
     async getPlan(planId) { if (typeof planId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(planId)) throw new ReaderError('invalid_request','Invalid plan identity.'); const p = await request(url(`${path}/plans/${encodeURIComponent(planId)}`)); validatePlan(p); if (p.plan_id !== planId) throw new ReaderError('source_invalid','API returned a different plan identity'); return p; },
+    async listShoppingTrips() { const result = await request(url(`${path}/shopping-trips`)); validateTripList(result); return result; },
+    async getShoppingTrip(tripId) { if (!validTripId(tripId)) throw new ReaderError('invalid_request','Invalid shopping trip identity.'); const trip = await request(url(`${path}/shopping-trips/${encodeURIComponent(tripId)}`)); validateTrip(trip); if (trip.trip_id !== tripId) throw new ReaderError('source_invalid','API returned a different shopping trip identity'); return trip; },
+    async getCoverage(range) { validateRange(range); const result = await request(url(`${path}/coverage?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)); validateCoverage(result); if (result.items.some(item=>item.week_start>range.to||item.week_end<range.from)) throw new ReaderError('source_invalid','API returned coverage outside the requested range.'); result.items.sort((a,b)=>a.week_start.localeCompare(b.week_start)); return result; },
     async getShoppingList(planId, revision, snapshotId) {
       if (typeof planId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(planId) || !Number.isInteger(revision) || revision < 1 || typeof snapshotId !== 'string' || !snapshotId) throw new ReaderError('invalid_request','A valid plan identity, revision, and snapshot token are required.');
       const shop = await request(url(`${path}/plans/${encodeURIComponent(planId)}/shopping-list?revision=${revision}&snapshot_id=${encodeURIComponent(snapshotId)}`));
