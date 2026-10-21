@@ -10,16 +10,36 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install validator dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e planner jsonschema pyyaml
+
+    - name: Validate the active publication
+      run: |
+        test -f publication/index.json || { echo "::error::publication/index.json is missing. Run scripts/export_pages_publication.sh and commit publication/."; exit 1; }
+        # The validator accepts exactly one publication, so check a copy holding only the active one.
+        active=$(python -c "import json; print(json.load(open('publication/index.json'))['manifest_path'].split('/')[1])")
+        mkdir -p "$RUNNER_TEMP/active/publications"
+        cp publication/index.json "$RUNNER_TEMP/active/"
+        cp -r "publication/publications/$active" "$RUNNER_TEMP/active/publications/"
+        python scripts/validate_publication_contract.py --bundle "$RUNNER_TEMP/active"
+
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version-file: .nvmrc
 
     - name: Build Site
       run: |
         cd site
         npm ci
-        npm run build
+        VITE_PUBLICATION_DIR=publication npm run build:pages
 
     - name: Upload site build
       uses: actions/upload-artifact@v4
@@ -30,6 +50,6 @@ jobs:
 
     - name: Summary
       run: |
-        echo "### Frontend build ready" >> "$GITHUB_STEP_SUMMARY"
+        echo "### Static site built from publication/" >> "$GITHUB_STEP_SUMMARY"
         echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "Artifact \`site-build\` is ready. Run **Deploy to Pages** with this workflow run ID to publish frontend-only changes." >> "$GITHUB_STEP_SUMMARY"
+        echo "Artifact \`site-build\` is ready. Run **Deploy to Pages** with run ID: \`${{ github.run_id }}\`" >> "$GITHUB_STEP_SUMMARY"

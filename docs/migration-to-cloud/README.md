@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phases 1–3 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users can create, preview/accept/discard regeneration, undo, and fill a month (a batch of independent weekly plans) in API mode, while static mode stays read-only. Weekly rules are domain specifications checked on every saved plan; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Backend, frontend, contract checks, and a browser walkthrough (2026-10-21) pass. Phase 4 (month/year navigation, shopping trips that cover weeks, and a minimal manual exporter so the public site shows what to buy) is next.
+**Status:** Phases 1–4 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Next: phase 6 (NAS operation, household login, automated publishing) or phase 5 (safe recipe replacements).
 
 ## Starting point and first milestone
 
@@ -221,7 +221,7 @@ In phase 4, shared household state is the shopping trip (see “Domain and plan 
 
 **Exit:** home users create and revisit saved weeks after restart, preview and discard without changing current state, and accept revisions without losing their predecessors. Stale/duplicate requests and failed writes cannot silently overwrite or partially commit a plan. SQLite imports preserve the phase 2 read shapes and calculations, and a tested independent backup restores locally.
 
-### Phase 4 — Monthly views, shopping trips, and a minimal exporter
+### Phase 4 — Monthly views, shopping trips, and a minimal exporter (complete)
 
 **4a: shopping trips (domain, storage, API).** Add the `ShoppingTrip` aggregate and its invariants (one trip per week; frozen covered revisions on done; derived items and coverage) in the domain, a `ShoppingTripRepository` port with SQLite and in-memory adapters, and a migration. Extend OpenAPI before adding routes: list/get trips, create, add/remove week, mark done, reopen, delete, each carrying the expected trip `version` (stale → `409`), plus week coverage on plan summaries or a coverage read. Writes stay loopback/home-only like phase 3.
 
@@ -351,6 +351,17 @@ If the HTTP server answers `503 source_unavailable` for a SQLite database, the f
 `migrate` refuses a missing file (use `import` to create a database) and is idempotent. `export` never writes to the database. It publishes the current revision of every plan whose Monday-Sunday week overlaps a selected month, plus every shopping trip whose weeks are all in that set (others are listed as skipped with the reason), into `<out>/publications/<publication_id>/`, validates the written bundle (including `scripts/validate_publication_contract.py`; `--skip-schema-validation` skips only that JSON-schema pass), and only then replaces `<out>/index.json`. A failure before that last step leaves the previous `index.json` untouched and removes the new directory. Earlier publication directories in `--out` are kept (no retention cleanup yet).
 
 Reads are not one SQLite transaction (plans, groceries and trips come through separate repositories); the exporter checks that they agree and re-reads up to three times if the data changed mid-export, then fails. Publishing stays manual: copy the contents of `<out>` into the Pages site's `publication/` directory (index last) and push. Old publication directories you no longer want must be removed by hand for now, and the validator only accepts one active publication, so validate the Pages directory only after pruning to the active one.
+
+### Publish to GitHub Pages (manual, until phase 6)
+
+The Pages site is built from the committed `publication/` directory (anyone can read it: the repository and the site are public).
+
+1. `scripts/export_pages_publication.sh 2026-10,2026-11 [--db var/mealplanner.db]` exports the selected months and their shopping trips into `publication/` and keeps the three newest publications.
+2. Commit `publication/` and push.
+3. Run the **Build Frontend** workflow. It validates the active publication and runs `VITE_PUBLICATION_DIR=publication npm run build:pages`.
+4. Run **Deploy to Pages** with that run ID. The `github-pages` environment only deploys from `main` (or `gh-pages`).
+
+Locally, `VITE_PUBLICATION_DIR=publication npm run dev:static` previews the same bundle. The legacy **Generate Plan** workflow was removed: Pages never runs the solver.
 
 ### Phase 2 checks and build scope
 
