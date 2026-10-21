@@ -150,7 +150,7 @@ class ShoppingTripService:
             groceries.append((week.plan_id, rev.snapshot.shopping_list))
         return {
             "trip_id": trip.trip_id,
-            "name": trip.name,
+            "name": trip.display_name,
             "status": trip.status,
             "version": trip.version,
             "created_at": trip.created_at.isoformat(),

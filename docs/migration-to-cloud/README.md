@@ -74,7 +74,7 @@ Derive saved grocery totals from the accepted assignment snapshots and their cap
 
 A month is a view over current weekly plans, not another aggregate or solver horizon. Fetch every plan whose Monday–Sunday week overlaps the selected month, including a week crossing a month boundary. Weekly rules stay scoped to their week; there are no cross-week rules (decided). If the manifest has no entry for a month, the public site says “No published plan.” It does not claim that the month is unplanned on the private NAS.
 
-A **ShoppingTrip** (shown to users as a “shopping list”) is a separate aggregate that answers “what do we buy to cover these weeks?” It holds a set of weekly plans, a status (`open` or `done`), and a `version` for optimistic concurrency. It never modifies a plan or creates a plan revision.
+A **ShoppingTrip** (shown to users as a “shopping list”) is a separate aggregate that answers “what do we buy to cover these weeks?” It holds a set of weekly plans, a status (`open` or `done`), and a `version` for optimistic concurrency. Its name is the one the user typed, or, when left blank, derived from its current weeks (it follows weeks being added or removed). It never modifies a plan or creates a plan revision.
 
 - **Items** are the sum, per ingredient and unit, of each covered week's saved grocery rows. They are derived, not stored or edited. There is no pantry tracking beyond what each weekly grocery list already captured, and no record of what was actually bought.
 - **Open trip:** items are derived from each week's current revision. Weeks can be added and removed.

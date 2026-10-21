@@ -342,7 +342,7 @@ def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> l
         trips.append(
             ShoppingTrip(
                 trip_id=row["trip_id"],
-                name=row["name"],
+                name=row["name"] if row["name_is_custom"] else None,
                 status=row["status"],
                 version=row["version"],
                 created_at=datetime.fromisoformat(row["created_at"]),
@@ -398,11 +398,12 @@ class SqliteShoppingTripRepository:
         try:
             with self._conn() as conn, transaction(conn):
                 conn.execute(
-                    "INSERT INTO shopping_trips (trip_id, name, status, version, created_at,"
-                    " updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO shopping_trips (trip_id, name, name_is_custom, status, version,"
+                    " created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         trip.trip_id,
-                        trip.name,
+                        trip.display_name,
+                        int(trip.name is not None),
                         trip.status,
                         trip.version,
                         _dt(trip.created_at),
@@ -451,10 +452,11 @@ class SqliteShoppingTripRepository:
             with self._conn() as conn, transaction(conn):
                 self._check_version(conn, trip.trip_id, expected_version)
                 conn.execute(
-                    "UPDATE shopping_trips SET name = ?, status = ?, version = ?,"
-                    " updated_at = ?, completed_at = ? WHERE trip_id = ?",
+                    "UPDATE shopping_trips SET name = ?, name_is_custom = ?, status = ?,"
+                    " version = ?, updated_at = ?, completed_at = ? WHERE trip_id = ?",
                     (
-                        trip.name,
+                        trip.display_name,
+                        int(trip.name is not None),
                         trip.status,
                         trip.version,
                         _dt(trip.updated_at),

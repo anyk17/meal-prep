@@ -101,6 +101,19 @@ def test_create_trip(env: Env) -> None:
     assert named["name"] == "Big shop"
 
 
+
+def test_unnamed_trip_name_follows_its_weeks(env: Env) -> None:
+    p1, p2, p3 = env.plan(W1), env.plan(W2), env.plan(W3)
+    auto = env.svc.create([p2])
+    assert auto["name"] == "Nov 2 - Nov 8"
+    auto = env.svc.add_week(auto["trip_id"], p1, auto["version"])
+    assert auto["name"] == "Oct 26 - Nov 8"
+    auto = env.svc.remove_week(auto["trip_id"], p2, auto["version"])
+    assert env.svc.get(auto["trip_id"])["name"] == "Oct 26 - Nov 1"
+    named = env.svc.create([p3], name="Big shop")
+    assert env.svc.get(named["trip_id"])["name"] == "Big shop"
+
+
 def test_create_validation(env: Env) -> None:
     p1 = env.plan(W1)
     with pytest.raises(trips.InvalidTrip):
@@ -236,7 +249,7 @@ def test_sqlite_constraints(tmp_path) -> None:
     conn = connect(env.db)
     try:
         conn.execute(
-            "INSERT INTO shopping_trips VALUES ('trip_b', 'x', 'open', 1, 'a', 'a', NULL)"
+            "INSERT INTO shopping_trips VALUES ('trip_b', 'x', 'open', 1, 'a', 'a', NULL, 0)"
         )
         with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
             conn.execute("INSERT INTO shopping_trip_weeks (trip_id, plan_id) VALUES ('trip_b', ?)", (p1,))
@@ -246,7 +259,7 @@ def test_sqlite_constraints(tmp_path) -> None:
             )
         with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
             conn.execute(
-                "INSERT INTO shopping_trips VALUES ('trip_c', 'x', 'open', 1, 'a', 'a', NULL)"
+                "INSERT INTO shopping_trips VALUES ('trip_c', 'x', 'open', 1, 'a', 'a', NULL, 0)"
             )
             conn.execute(
                 "INSERT INTO shopping_trip_weeks VALUES ('trip_c', ?, 99, 'sha256:x')", (p2,)

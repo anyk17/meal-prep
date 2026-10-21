@@ -134,6 +134,15 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )""",
         ),
     ),
+    (
+        3,
+        "shopping trip names follow their weeks unless chosen",
+        (
+            # name keeps the displayed name; existing trips were created unnamed, so 0.
+            "ALTER TABLE shopping_trips ADD COLUMN name_is_custom INTEGER NOT NULL DEFAULT 0"
+            " CHECK (name_is_custom IN (0, 1))",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

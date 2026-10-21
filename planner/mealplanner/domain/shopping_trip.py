@@ -89,7 +89,7 @@ class TripWeek:
 @dataclass(frozen=True)
 class ShoppingTrip:
     trip_id: str
-    name: str
+    name: str | None  # a user-chosen name; None means "named after its weeks"
     status: str  # OPEN | DONE
     version: int
     created_at: datetime
@@ -100,6 +100,11 @@ class ShoppingTrip:
     @property
     def plan_ids(self) -> tuple[str, ...]:
         return tuple(w.plan_id for w in self.weeks)
+
+    @property
+    def display_name(self) -> str:
+        """The chosen name, or one derived from the current weeks so it follows add/remove."""
+        return self.name if self.name is not None else default_name(self.weeks)
 
 
 def _sorted_weeks(weeks: Iterable[TripWeek]) -> tuple[TripWeek, ...]:
@@ -118,9 +123,10 @@ def default_name(weeks: Sequence[TripWeek]) -> str:
     return f"{fmt(first)} - {fmt(end)}"
 
 
-def clean_name(name: str | None, weeks: Sequence[TripWeek]) -> str:
+def clean_name(name: str | None) -> str | None:
+    """Normalized user name, or None (blank) to name the trip after its weeks."""
     if name is None or not name.strip():
-        return default_name(weeks)
+        return None
     cleaned = " ".join(name.split())
     if len(cleaned) > MAX_NAME_LENGTH:
         raise InvalidTrip(f"name must be at most {MAX_NAME_LENGTH} characters")
@@ -138,7 +144,7 @@ def new_trip(
     if len({w.plan_id for w in weeks}) != len(weeks):
         raise InvalidTrip("plan_ids must be unique")
     open_weeks = _sorted_weeks(TripWeek(w.plan_id, w.week_start) for w in weeks)
-    return ShoppingTrip(trip_id, clean_name(name, open_weeks), OPEN, 1, now, now, open_weeks)
+    return ShoppingTrip(trip_id, clean_name(name), OPEN, 1, now, now, open_weeks)
 
 
 def require_version(trip: ShoppingTrip, expected: int) -> None:
