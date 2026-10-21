@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phases 1–4 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Next: phase 6 (NAS operation, household login, automated publishing) or phase 5 (safe recipe replacements).
+**Status:** Phases 1–4 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Phase 5 (flexible meal swaps) is in progress; phase 6 (NAS operation, household login, automated publishing) follows.
 
 ## Starting point and first milestone
 
@@ -66,7 +66,7 @@ Generation and edits follow these rules:
 - Each accepted replacement later creates one revision. If linked lunch/dinner assignments change, both changes validate and commit together. Undo appends a restoring revision rather than deleting history or decrementing the revision number.
 - Mutation requests carry the expected revision. Stale proposals and concurrent writes are rejected for refresh/re-preview. Retry identifiers make a retried accepted request idempotent. Creating two plans for one week is prevented by a database uniqueness constraint.
 - Full-week regeneration is initially limited to future weeks. Past meals stay fixed. Editing remaining meals in a started week needs an explicit policy for today's meals, locks, and weekly constraints.
-- Manual choices become locks before later regeneration can alter them. A compatible replacement preserves unrelated assignments. If exact protein counts, repetition limits, adjacency rules, or a paired meal make a replacement infeasible, explain the conflict; broader rebalancing needs a separate preview and explicit acceptance.
+- A manual swap preserves unrelated assignments and is not blocked by weekly rules (they are reported as warnings; see phase 5). Regeneration replaces the whole week; there are no locks for now.
 
 Append the revision and move the plan's current-revision pointer in one database transaction. Do expensive solving outside the transaction, then check the base revision at commit. Store complete plan snapshots so ordinary reads do not load all history. Grocery checkmarks, opening a plan, and theme changes are not plan revisions. Catalog edits do not rewrite previously saved assignments.
 
@@ -233,13 +233,18 @@ Keep weekly shopping totals per week. A trip's items are a plain sum of its week
 
 **Exit:** month and year boundaries work in API and static mode, including weeks crossing month boundaries. Home users create a trip from several weeks, see what to buy, mark it done, and see those weeks as covered after reload; a week cannot be on two trips; stale trip edits are rejected. An exported bundle validates, shows the published trips on the static site, and a failed export leaves the previous `index.json` active.
 
-### Phase 5 — Safe recipe replacements
+### Phase 5 — Flexible meal swaps
 
-Initially, “swap” means replacing a recipe/variant in a dated slot. Exchanging two scheduled meals is a separate future action.
+“Swap” replaces the recipe/variant in one dated slot with any catalog recipe/variant. Exchanging two scheduled meals is a separate future action. The household decides; weekly rules are **advisory for swaps** (decided).
 
-Define alternatives and replacement preview/accept routes before implementation. Validate recipe/variant eligibility, exact protein distribution, repetition limits, and applicable adjacency rules. Preserve unrelated assignments for the first replacement flow. For linked meals, preview all affected assignments and accept or reject them together. Recompute statistics and groceries as part of the same plan revision. Reject stale previews. Add explicit locks for manually chosen meals before offering regeneration that can affect them. Undo appends a new restoring revision.
+- **Rules:** a swap is never blocked by `domain/weekly_rules.py`. The preview and the result list the violations the swapped plan would have, as information. Generation (create, regenerate, month fill) still must satisfy every rule. Undo is allowed even when the restored revision violates rules (it may restore a swapped week); its violations are returned as warnings too.
+- **Linked lunch/dinner:** swapping one meal of a linked pair swaps both by default (they stay linked to the new recipe); the caller may choose `scope: "single"`, which swaps only that slot and removes the link from both. A swapped-in recipe's lunch→dinner extension is not added automatically.
+- **Which days:** any slot dated today or later in the household timezone, including in a started week; past slots are fixed.
+- **Flow:** a stateless preview (no stored proposal) returns the slot changes, the week's grocery delta (per ingredient and unit: before, after, difference), rule warnings, and the shopping trip impact (the trip holding the week, its status, and for a done trip the extra quantities now needed). Applying the swap carries `expected_revision` and an `Idempotency-Key`, appends exactly one revision (recomputing statistics and groceries from the saved assignments and the base revision's captured pantry), and returns the new plan plus warnings. A stale `expected_revision` is rejected. Undo appends a restoring revision as today.
+- **Shopping trips:** unchanged rules. An open trip's items follow the new revision automatically; a done trip keeps its frozen items and the week shows “changed since shopping”.
+- **Regenerate after swaps:** regenerate still replaces the whole week (no locks). Its proposal reports how many slots were changed by swaps since the last generated revision, and the UI warns before accepting (“this will replace N meals you swapped”).
 
-**Exit:** compatible replacements update the saved revision and groceries; invalid or stale replacements leave it intact; paired changes are atomic; undo cannot erase a later edit. Broader “rebalance this week” is a separately previewed full diff requiring explicit acceptance.
+**Exit:** a swap updates the saved revision and that week's groceries in one revision; stale or duplicate requests cannot apply twice; linked swaps are atomic; rule violations are shown but never block a swap; undo cannot erase a later edit; open shopping lists follow the swap and done lists flag the week.
 
 ### Phase 6 — NAS operation and public static publishing
 
@@ -418,5 +423,5 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Shopping trips | Aggregate covering a set of weeks; open/done; items = plain sum of weekly groceries; no pantry or purchase tracking; one trip per week; published to the static site | phase 4 |
 | Cross-week rules | None (decided) | — |
 | Month generation | Batch of independent weekly plans; no monthly or cross-week rules; existing weeks never overwritten | — |
-| Replacement | Preserve unrelated meals; explain infeasibility; candidates must satisfy `domain/weekly_rules.py` (same specifications as generation, solver-independent) | phase 5 |
+| Swaps | Any catalog recipe/variant in a today-or-later slot; preserve unrelated meals; weekly rules are advisory warnings for swaps and undo, enforced for generation; linked pairs swap together unless `scope: single`; no locks, regenerate warns about swapped meals | phase 5 |
 | Costs | Verify NAS, power, storage, GitHub plan, domain, transfer, and tooling at launch | before phase 6 |
