@@ -54,7 +54,6 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
   const toggle = item => update(current => { const next = { ...current }; const key = itemCheckKey(item); if (next[key]) delete next[key]; else next[key] = true; return next; });
   const checked = countChecked(trip.items, checks);
   const sections = groupItems(trip.items, checks);
-  const weekLabels = new Map(trip.weeks.map(week => [week.plan_id, shortDate(week.week_start)]));
 
   return (
     <div className="space-y-4">
@@ -89,7 +88,6 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {group.items.map(item => {
               const on = !!checks[itemCheckKey(item)];
-              const partial = trip.weeks.length > 1 && item.plan_ids.length < trip.weeks.length;
               return (
                 <li key={itemCheckKey(item)}>
                   <button type="button" role="checkbox" aria-checked={on} onClick={() => toggle(item)}
@@ -97,7 +95,6 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
                     <span className={cn('w-7 h-7 rounded-md border-2 flex items-center justify-center shrink-0', on ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 dark:border-slate-600')}>{on && <Check size={18} strokeWidth={3} />}</span>
                     <span className="flex-1 min-w-0">
                       <span className={cn('block text-base font-medium text-slate-900 dark:text-slate-100', on && 'line-through')}>{item.display}</span>
-                      {partial && <span className="block text-xs text-slate-500 dark:text-slate-400">{item.plan_ids.map(id => weekLabels.get(id)).join(', ')}</span>}
                     </span>
                     <span className="font-mono text-sm text-slate-700 dark:text-slate-200 shrink-0">{formatQuantity(item.quantity, item.unit)}</span>
                   </button>
