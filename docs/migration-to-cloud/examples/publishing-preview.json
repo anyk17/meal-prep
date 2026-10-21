@@ -1,0 +1,30 @@
+{
+  "months": [
+    "2026-10",
+    "2026-11"
+  ],
+  "weeks": [
+    {
+      "plan_id": "plan_2026_10_19",
+      "week_start": "2026-10-19",
+      "week_end": "2026-10-25",
+      "revision": 2,
+      "published_revision": 1
+    },
+    {
+      "plan_id": "plan_2026_10_26",
+      "week_start": "2026-10-26",
+      "week_end": "2026-11-01",
+      "revision": 1,
+      "published_revision": null
+    }
+  ],
+  "trips": [
+    {
+      "trip_id": "trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b",
+      "name": "Weekend shop",
+      "status": "open"
+    }
+  ],
+  "unchanged": false
+}

@@ -23,7 +23,7 @@ function mockFetch(handler) {
 test('capabilities only reports true for an explicit can_edit_plans', async () => {
   const mock = mockFetch(() => json({ can_edit_plans: true }));
   try {
-    assert.deepEqual(await createPlanEditor().getCapabilities(), { canEditPlans: true, canEditShoppingTrips: false });
+    assert.deepEqual(await createPlanEditor().getCapabilities(), { canEditPlans: true, canEditShoppingTrips: false, canPublish: false });
     assert.equal(mock.calls[0].url.pathname, '/api/v1/capabilities');
   } finally { mock.restore(); }
   const off = mockFetch(() => json({ can_edit_plans: 'yes' }));

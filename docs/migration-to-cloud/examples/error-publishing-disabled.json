@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "publishing_disabled",
+    "message": "Publishing is not configured (set MEALPLANNER_PUBLISH_REPO).",
+    "details": []
+  }
+}

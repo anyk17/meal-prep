@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "publish_failed",
+    "message": "git push failed: ! [rejected] main -> main (fetch first)",
+    "details": []
+  }
+}

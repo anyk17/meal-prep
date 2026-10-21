@@ -1,0 +1,15 @@
+{
+  "job_id": "job_20261021T152000Z_77aa01bc",
+  "months": [
+    "2026-10",
+    "2026-11"
+  ],
+  "status": "unchanged",
+  "publication_id": "pub_20261021T150000Z_a1b2c3",
+  "commit_sha": null,
+  "run_url": null,
+  "error": null,
+  "started_at": "2026-10-21T10:20:00-05:00",
+  "finished_at": "2026-10-21T10:20:02-05:00",
+  "deployed_at": null
+}

@@ -53,6 +53,10 @@ EXPECTED_PATHS = {
     "/api/v1/shopping-trips/{trip_id}/done": {"post"},
     "/api/v1/shopping-trips/{trip_id}/reopen": {"post"},
     "/api/v1/coverage": {"get"},
+    "/api/v1/publishing": {"get"},
+    "/api/v1/publishing/preview": {"get"},
+    "/api/v1/publishing/jobs": {"post"},
+    "/api/v1/publishing/jobs/{job_id}": {"get"},
 }
 # POST operations whose body is an empty object (the identifier is in the path).
 EMPTY_BODY_PATHS = {"/api/v1/months/{month}/fill"}

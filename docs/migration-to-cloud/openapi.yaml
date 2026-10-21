@@ -23,6 +23,8 @@ tags:
     description: Replace the recipe variant of a dated slot (weekly rules are advisory) and list the variants a slot can take.
   - name: Shopping trips
     description: Shopping trips (called shopping lists in the UI) that cover weekly plans, and week coverage.
+  - name: Publishing
+    description: Publish selected months to the public repository (loopback, SQLite-backed API with publishing configured).
   - name: Capabilities
     description: What the calling client may do.
 paths:
@@ -1401,6 +1403,152 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '503':
           $ref: '#/components/responses/SourceFailure'
+  /api/v1/publishing:
+    get:
+      tags: [Publishing]
+      operationId: getPublishing
+      summary: Publishing status
+      description: |-
+        Whether publishing is configured (enabled), the public site URL, the most recently started job and the most recent job confirmed live. A latest job in status pushed is refreshed from GitHub first (cached for at least 10 seconds), so it may come back live or failed. Job records are private and never part of the public bundle.
+      responses:
+        '200':
+          description: Publishing status.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishingStatus'
+              examples:
+                enabled:
+                  summary: Configured, a push awaiting its Pages deployment
+                  externalValue: examples/publishing.json
+                disabled:
+                  summary: MEALPLANNER_PUBLISH_REPO is not set
+                  externalValue: examples/publishing-disabled.json
+  /api/v1/publishing/preview:
+    get:
+      tags: [Publishing]
+      operationId: previewPublication
+      summary: Preview what publishing the selected months would include
+      description: |-
+        Lists every full week overlapping the selected months with its current revision and the revision in the last live job (published_revision, null when never published), plus every shopping trip whose weeks are all included. unchanged is true when publishing now would be a no-op because the public repository already holds identical content built from the same application revision. Nothing is written or pushed.
+      parameters:
+        - name: months
+          in: query
+          required: true
+          description: Comma-separated YYYY-MM months; 1 to 12, unique.
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])(,\d{4}-(0[1-9]|1[0-2])){0,11}$'
+          example: 2026-10,2026-11
+      responses:
+        '200':
+          description: The preview.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishingPreview'
+              examples:
+                preview:
+                  summary: Two months, one week republished
+                  externalValue: examples/publishing-preview.json
+        '422':
+          $ref: '#/components/responses/PublishInvalidMonths'
+        '502':
+          $ref: '#/components/responses/PublishFailed'
+        '503':
+          $ref: '#/components/responses/PublishingDisabled'
+  /api/v1/publishing/jobs:
+    post:
+      tags: [Publishing]
+      operationId: createPublicationJob
+      summary: Publish the selected months
+      description: |-
+        Runs synchronously: exports the selected months, validates the bundle, commits it to the public repository and pushes it. The response is the finished job: pushed (the Pages deployment is still to be confirmed through the job resource) or unchanged (the repository already had identical content; nothing was committed). One job runs at a time (409 publish_in_progress). A failure is recorded as a failed job, answered with 502 publish_failed, and leaves the previously pushed version untouched. Needs a loopback client (403 forbidden) and publishing configured (503 publishing_disabled, also when the application revision is unknown).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishRequest'
+            example:
+              months: ['2026-10', '2026-11']
+      responses:
+        '201':
+          description: The finished job.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishingJob'
+              examples:
+                pushed:
+                  summary: Pushed, deployment pending
+                  externalValue: examples/publishing-job.json
+                unchanged:
+                  summary: Identical to what is published
+                  externalValue: examples/publishing-job-unchanged.json
+        '400':
+          $ref: '#/components/responses/PublishInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '409':
+          $ref: '#/components/responses/PublishInProgress'
+        '422':
+          $ref: '#/components/responses/PublishInvalidMonths'
+        '502':
+          $ref: '#/components/responses/PublishFailed'
+        '503':
+          $ref: '#/components/responses/PublishingDisabled'
+  /api/v1/publishing/jobs/{job_id}:
+    get:
+      tags: [Publishing]
+      operationId: getPublicationJob
+      summary: Read one publication job
+      description: |-
+        A job in status pushed is refreshed from the GitHub Actions run for its commit (cached for at least 10 seconds): live (with deployed_at) once the Pages deployment succeeded, failed when it did not. If GitHub cannot be reached the job stays pushed. live is never reported without that confirmation.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: The job.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishingJob'
+              examples:
+                pushed:
+                  summary: Deployment pending
+                  externalValue: examples/publishing-job.json
+                live:
+                  summary: Deployment confirmed
+                  externalValue: examples/publishing-job-live.json
+        '404':
+          $ref: '#/components/responses/PublishJobNotFound'
+        '503':
+          $ref: '#/components/responses/PublishingDisabled'
   /api/v1/capabilities:
     get:
       tags: [Capabilities]
@@ -1472,6 +1620,17 @@ components:
         maxLength: 128
         pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
       example: trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      description: Publication job identifier returned when the job was created.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+      example: job_20261021T150000Z_3f9a1c20
     ExpectedVersion:
       name: expected_version
       in: query
@@ -1695,6 +1854,102 @@ components:
             invalidSource:
               summary: Source data failed validation
               externalValue: examples/error-source-invalid.json
+    PublishInvalidRequest:
+      description: Malformed JSON body, unknown field, or missing months.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownField:
+              summary: Invalid or unknown body field
+              externalValue: examples/error-invalid-body.json
+    PublishInvalidMonths:
+      description: months is empty, malformed, contains a duplicate, or lists more than 12 months.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidMonths:
+              summary: Invalid month selection
+              externalValue: examples/error-invalid-months.json
+    PublishInProgress:
+      description: Another publication job is running (a running job older than 10 minutes counts as crashed).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            inProgress:
+              summary: A job is running
+              externalValue: examples/error-publish-in-progress.json
+    PublishFailed:
+      description: Export, validation, commit or push failed. The job is recorded as failed; the previous public version is untouched. The message never contains paths or credentials.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            failed:
+              summary: Push rejected
+              externalValue: examples/error-publish-failed.json
+    PublishingDisabled:
+      description: Publishing is not configured (no MEALPLANNER_PUBLISH_REPO, no SQLite database) or the application revision is unknown.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            disabled:
+              summary: Not configured
+              externalValue: examples/error-publishing-disabled.json
+    PublishJobNotFound:
+      description: No publication job exists for the requested identifier.
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              summary: Unknown job
+              externalValue: examples/error-not-found.json
   schemas:
     PlanList:
       type: object
@@ -1952,7 +2207,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [can_edit_plans, can_edit_shopping_trips]
+      required: [can_edit_plans, can_edit_shopping_trips, can_publish]
       properties:
         can_edit_plans:
           type: boolean
@@ -1960,6 +2215,130 @@ components:
         can_edit_shopping_trips:
           type: boolean
           description: True under the same conditions; gates creating, changing, finishing, and deleting shopping trips.
+        can_publish:
+          type: boolean
+          description: True only for a loopback client when publishing is configured (MEALPLANNER_PUBLISH_REPO); gates the publish view.
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [months]
+      properties:
+        months:
+          type: array
+          minItems: 1
+          maxItems: 12
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+    PublishingJob:
+      type: object
+      additionalProperties: false
+      required: [job_id, months, status, publication_id, commit_sha, run_url, error, started_at, finished_at, deployed_at]
+      description: A private record of one publish attempt.
+      properties:
+        job_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        months:
+          type: array
+          items:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        status:
+          type: string
+          enum: [running, pushed, live, failed, unchanged]
+          description: running (in progress, or crashed until it is 10 minutes old), pushed (committed and pushed, deployment not yet confirmed), live (Pages deployment confirmed), failed (export, push or deployment failed), unchanged (identical content already published; no commit).
+        publication_id:
+          type: [string, 'null']
+          description: The publication this job pushed, or for unchanged the one already published.
+        commit_sha:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}$'
+        run_url:
+          type: [string, 'null']
+          format: uri
+          description: The GitHub Actions run that builds and deploys the pushed commit, once known.
+        error:
+          type: [string, 'null']
+          description: Safe failure message (no paths or credentials).
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the export and push finished (not when the deployment did).
+        deployed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the Pages deployment was confirmed; set only with status live.
+    PublishingStatus:
+      type: object
+      additionalProperties: false
+      required: [enabled, site_url, latest_job, last_live_job]
+      properties:
+        enabled:
+          type: boolean
+        site_url:
+          type: string
+        latest_job:
+          anyOf:
+            - $ref: '#/components/schemas/PublishingJob'
+            - type: 'null'
+        last_live_job:
+          anyOf:
+            - $ref: '#/components/schemas/PublishingJob'
+            - type: 'null'
+    PublishingPreview:
+      type: object
+      additionalProperties: false
+      required: [months, weeks, trips, unchanged]
+      properties:
+        months:
+          type: array
+          items:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        weeks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [plan_id, week_start, week_end, revision, published_revision]
+            properties:
+              plan_id:
+                type: string
+              week_start:
+                type: string
+                format: date
+              week_end:
+                type: string
+                format: date
+              revision:
+                type: integer
+                minimum: 1
+              published_revision:
+                type: [integer, 'null']
+                minimum: 1
+                description: Revision of this week in the last live job; null when it was never published.
+        trips:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [trip_id, name, status]
+            properties:
+              trip_id:
+                type: string
+              name:
+                type: string
+              status:
+                type: string
+                enum: [open, done]
+        unchanged:
+          type: boolean
+          description: True when publishing now would be a no-op.
     FillMonthRequest:
       type: object
       additionalProperties: false
@@ -2525,7 +2904,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week]
+              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week, invalid_months, publish_in_progress, publishing_disabled, publish_failed, not_found]
             message:
               type: string
             details:

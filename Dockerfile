@@ -1,6 +1,6 @@
 # Production image: API-mode frontend + Flask (gunicorn) + OR-Tools. linux/amd64 (UGOS NAS, Intel N100).
 # State lives in the /data volume, never in the image. Build from the repository root:
-#   docker build -t meal-prep:dev .
+#   docker build --build-arg APP_REVISION=$(git rev-parse HEAD) -t meal-prep:dev .
 # Base images are pinned by digest (multi-arch index); refresh them deliberately:
 #   curl -sI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" \
 #     https://registry-1.docker.io/v2/library/<image>/manifests/<tag>   # docker-content-digest
@@ -36,7 +36,13 @@ COPY deploy/github_known_hosts /etc/ssh/ssh_known_hosts
 COPY planner/requirements.lock /tmp/requirements.lock
 RUN pip install --require-hashes --no-deps -r /tmp/requirements.lock && rm /tmp/requirements.lock
 
-RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin app \
+# The user must exist in /etc/passwd: ssh (the publication push) refuses to run for an unknown uid.
+# Production keeps 10001; the dev Compose file builds with the developer's uid/gid so a bind-mounted
+# data directory and deploy key stay readable and ssh still finds a passwd entry.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN groupadd --gid "$APP_GID" app \
+    && useradd --uid "$APP_UID" --gid app --no-create-home --shell /usr/sbin/nologin app \
     && mkdir /data && chown app:app /data
 WORKDIR /app
 COPY planner/mealplanner ./planner/mealplanner
@@ -45,7 +51,13 @@ COPY --from=frontend /build/site/dist ./static
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN python -m compileall -q /app/planner && chmod 0755 /usr/local/bin/entrypoint.sh
 
-USER 10001:10001
+# The meal-prep commit this image was built from (git SHA). The publish step records it as `app-ref` in
+# the public repository so its workflow builds the frontend from exactly this code. Empty = unknown, and
+# publishing refuses to run. Last, so a new commit only invalidates this layer.
+ARG APP_REVISION=""
+ENV MEALPLANNER_APP_REVISION=$APP_REVISION
+
+USER app:app
 VOLUME /data
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

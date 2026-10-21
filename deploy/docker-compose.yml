@@ -20,6 +20,7 @@ services:
       # No login exists yet (phase 6c): the published port is the only access control, so the port is
       # bound to loopback below. Do not widen it before household login ships.
       MEALPLANNER_TRUST_NETWORK_PEERS: "1"
+      MEALPLANNER_PUBLISH_REPO: git@github.com:jflopezo91/meal-plan.git
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -41,9 +42,12 @@ services:
     # pids_limit: 256
     #
     # Phase 6b: the publish deploy key, mounted as a file (never an environment variable).
-    # secrets:
-    #   - deploy_key
+    secrets:
+      - deploy_key
 
-# secrets:
-#   deploy_key:
-#     file: /volume1/docker/meal-prep/secrets/deploy_key   # chmod 600, readable by uid 10001
+secrets:
+  deploy_key:
+    # Generated on the NAS: ssh-keygen -t ed25519 -N "" -f /volume1/docker/meal-prep/secrets/deploy_key
+    # then: chown 10001:10001 deploy_key && chmod 600 deploy_key && chmod 700 ../secrets
+    # (the file keeps its host owner and mode, and ssh rejects a key the container user does not own).
+    file: /volume1/docker/meal-prep/secrets/deploy_key

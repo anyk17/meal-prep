@@ -315,7 +315,10 @@ def register_write_routes(
     @app.get("/api/v1/capabilities")
     def capabilities():
         editable = can_edit()
-        return jsonify({"can_edit_plans": editable, "can_edit_shopping_trips": editable})
+        can_publish = app.config.get("PUBLISHING_SERVICE") is not None and is_loopback()
+        return jsonify(
+            {"can_edit_plans": editable, "can_edit_shopping_trips": editable, "can_publish": can_publish}
+        )
 
     @app.post("/api/v1/plans")
     def create_plan():

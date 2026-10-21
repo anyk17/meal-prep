@@ -1,0 +1,92 @@
+name: Deploy Pages
+
+# Builds the read-only meal-prep frontend (pinned by app-ref) over publication/ and deploys it to GitHub Pages.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys never overlap and a running deploy is never cancelled; a newer push waits its turn.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out this repository (publication data and app-ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: plan
+          persist-credentials: false
+
+      - name: Read and validate app-ref
+        id: ref
+        run: |
+          test -f plan/app-ref || { echo "::error::app-ref is missing."; exit 1; }
+          sha=$(tr -d '[:space:]' < plan/app-ref)
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::app-ref must hold one 40-character lowercase commit SHA."; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out meal-prep at app-ref (public repository, no token)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: jflopezo91/meal-prep
+          ref: ${{ steps.ref.outputs.sha }}
+          path: app
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install validator dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e app/planner jsonschema pyyaml
+
+      - name: Validate the active publication
+        run: |
+          test -f plan/publication/index.json || { echo "::error::publication/index.json is missing."; exit 1; }
+          # The validator accepts exactly one publication, so check a copy holding only the active one.
+          active=$(python -c "import json; print(json.load(open('plan/publication/index.json'))['manifest_path'].split('/')[1])")
+          mkdir -p "$RUNNER_TEMP/active/publications"
+          cp plan/publication/index.json "$RUNNER_TEMP/active/"
+          cp -r "plan/publication/publications/$active" "$RUNNER_TEMP/active/publications/"
+          python app/scripts/validate_publication_contract.py --bundle "$RUNNER_TEMP/active"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/site/package-lock.json
+
+      - name: Build the site
+        working-directory: app/site
+        env:
+          VITE_BASE_PATH: /meal-plan/
+          VITE_PUBLICATION_DIR: ${{ github.workspace }}/plan/publication
+        run: |
+          npm ci
+          npm run build:pages
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: app/site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

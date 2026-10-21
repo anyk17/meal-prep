@@ -143,6 +143,27 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             " CHECK (name_is_custom IN (0, 1))",
         ),
     ),
+    (
+        4,
+        "publication jobs",
+        (
+            # Private record of publish attempts (never part of the public bundle). plan_tokens holds
+            # the exported plan/revision/snapshot tokens, trips, content hash and app revision.
+            """CREATE TABLE publication_jobs (
+                job_id TEXT PRIMARY KEY,
+                months TEXT NOT NULL CHECK (json_valid(months)),
+                status TEXT NOT NULL CHECK (status IN ('running', 'pushed', 'live', 'failed', 'unchanged')),
+                publication_id TEXT,
+                commit_sha TEXT,
+                run_url TEXT,
+                error TEXT,
+                plan_tokens TEXT NOT NULL CHECK (json_valid(plan_tokens)),
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                deployed_at TEXT
+            )""",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

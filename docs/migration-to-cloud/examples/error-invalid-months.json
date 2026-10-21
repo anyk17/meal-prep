@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_months",
+    "message": "Select at least one month (YYYY-MM).",
+    "details": [
+      {
+        "field": "months",
+        "message": "Select at least one month (YYYY-MM)."
+      }
+    ]
+  }
+}

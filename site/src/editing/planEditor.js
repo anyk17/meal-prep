@@ -89,7 +89,7 @@ export function createPlanEditor(base = '/api/v1') {
   return {
     async getCapabilities() {
       const result = await request('GET', '/capabilities');
-      return { canEditPlans: result?.can_edit_plans === true, canEditShoppingTrips: result?.can_edit_shopping_trips === true };
+      return { canEditPlans: result?.can_edit_plans === true, canEditShoppingTrips: result?.can_edit_shopping_trips === true, canPublish: result?.can_publish === true };
     },
     async createPlan(weekStart, seed) {
       if (typeof weekStart !== 'string' || !DATE_PATTERN.test(weekStart)) throw new ReaderError('invalid_request', 'A week start date is required.');

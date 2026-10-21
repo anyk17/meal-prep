@@ -21,6 +21,7 @@ from ...application.plan_reads import PlanReadService
 from ...application.ports import PlanGenerator, PlanReadRepository
 from ...domain.snapshot import SourceInvalidError
 from .ops_routes import register_health_route, register_static_routes
+from .publish_routes import register_publish_routes
 from .read_routes import register_read_routes
 from .trip_routes import register_trip_routes
 from .write_routes import GenerationGate, register_write_routes
@@ -129,6 +130,85 @@ def _build_trip_service(
     )
 
 
+DEFAULT_PUBLISH_KEY = "/run/secrets/deploy_key"
+DEFAULT_PUBLISH_KNOWN_HOSTS = "/etc/ssh/ssh_known_hosts"
+DEFAULT_PUBLIC_SITE_URL = "https://jflopezo91.github.io/meal-plan/"
+DEFAULT_PUBLISH_GITHUB_REPO = "jflopezo91/meal-plan"
+FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def resolve_app_revision() -> str | None:
+    """The meal-prep commit this code was built from: MEALPLANNER_APP_REVISION, else the checkout's HEAD."""
+    configured = (os.environ.get("MEALPLANNER_APP_REVISION") or "").strip().lower()
+    if configured:
+        return configured if FULL_SHA_PATTERN.fullmatch(configured) else None
+    if not (PROJECT_ROOT / ".git").exists():
+        return None
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5, check=False
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out if FULL_SHA_PATTERN.fullmatch(out) else None
+
+
+def _lazy_bundle_validator() -> Callable[[Path], Any]:
+    """The JSON-schema bundle validator when the checkout has it (the image does not ship scripts/)."""
+    state: dict[str, Any] = {}
+
+    def validate(root: Path) -> Any:
+        if "fn" not in state:
+            from ..db_cli import full_bundle_validator
+
+            try:
+                state["fn"] = full_bundle_validator()
+            except Exception:  # noqa: BLE001 - missing scripts/jsonschema: coherence checks still run
+                state["fn"] = lambda _root: []
+        return state["fn"](root)
+
+    return validate
+
+
+def _build_publishing_service(
+    db_path: Path | str,
+    timezone: str | None,
+    clock: Callable[[], datetime] | None,
+    trip_service: Any,
+) -> Any:
+    """PublishingService from MEALPLANNER_PUBLISH_* settings; None when MEALPLANNER_PUBLISH_REPO is unset."""
+    remote = (os.environ.get("MEALPLANNER_PUBLISH_REPO") or "").strip()
+    if not remote:
+        return None
+    from ...adapters.git_publication import GitPublicationRepository
+    from ...adapters.github_deployments import GithubDeploymentStatusReader
+    from ...adapters.sqlite.publication_jobs import SqlitePublishJobRepository
+    from ...adapters.sqlite.store import SqlitePlanReadAdapter
+    from ...application.publication import PublicationService
+    from ...application.publishing import PublishingService
+
+    zone = timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota")
+    now = clock or (lambda: datetime.now(ZoneInfo(zone)))
+    workdir = os.environ.get("MEALPLANNER_PUBLISH_WORKDIR") or str(Path(db_path).resolve().parent / "publish-repo")
+    return PublishingService(
+        PublicationService(SqlitePlanReadAdapter(db_path), trip_service, now, zone),
+        GitPublicationRepository(
+            remote,
+            workdir,
+            key_path=os.environ.get("MEALPLANNER_PUBLISH_KEY") or DEFAULT_PUBLISH_KEY,
+            known_hosts_path=os.environ.get("MEALPLANNER_PUBLISH_KNOWN_HOSTS") or DEFAULT_PUBLISH_KNOWN_HOSTS,
+            validate=_lazy_bundle_validator(),
+        ),
+        SqlitePublishJobRepository(db_path),
+        GithubDeploymentStatusReader(os.environ.get("MEALPLANNER_PUBLISH_GITHUB_REPO") or DEFAULT_PUBLISH_GITHUB_REPO),
+        now,
+        app_revision=resolve_app_revision(),
+        site_url=os.environ.get("MEALPLANNER_PUBLIC_SITE_URL") or DEFAULT_PUBLIC_SITE_URL,
+    )
+
+
 def create_app(
     repository: PlanReadRepository | None = None,
     *,
@@ -145,6 +225,7 @@ def create_app(
     proposal_ttl: timedelta | None = None,
     static_dir: Path | str | None = None,
     trust_network_peers: bool | None = None,
+    publishing_service: Any = None,
 ) -> Any:
     """Create the API. Source files are loaded and validated once.
 
@@ -157,6 +238,10 @@ def create_app(
     trust_network_peers (or MEALPLANNER_TRUST_NETWORK_PEERS=1) treats every TCP peer as local;
     it exists for the container, where the published port (bound to loopback by Compose) is the
     only access control. Remove it when household login (phase 6c) lands.
+
+    Publishing (phase 6b) is configured by MEALPLANNER_PUBLISH_REPO (unset = disabled) and the other
+    MEALPLANNER_PUBLISH_* / MEALPLANNER_PUBLIC_SITE_URL / MEALPLANNER_APP_REVISION settings;
+    publishing_service injects a PublishingService instead (tests).
     """
     try:
         from flask import Flask, jsonify, request
@@ -173,6 +258,8 @@ def create_app(
     app.config["PLAN_WORKFLOW_SERVICE"] = None
     app.config["PLAN_WRITE_FAILURE"] = False
     app.config["SHOPPING_TRIP_SERVICE"] = None
+    app.config["PUBLISHING_SERVICE"] = publishing_service
+    app.config["PUBLIC_SITE_URL"] = os.environ.get("MEALPLANNER_PUBLIC_SITE_URL") or DEFAULT_PUBLIC_SITE_URL
     sqlite_path = db_path or os.environ.get("MEALPLANNER_DB")
     if repository is not None:
         app.config["PLAN_READ_SERVICE"] = PlanReadService(repository)
@@ -187,6 +274,10 @@ def create_app(
                 sqlite_path, timezone, clock, generator, solver_timeout_seconds, proposal_ttl
             )
             app.config["SHOPPING_TRIP_SERVICE"] = _build_trip_service(sqlite_path, timezone, clock)
+            if publishing_service is None:
+                app.config["PUBLISHING_SERVICE"] = _build_publishing_service(
+                    sqlite_path, timezone, clock, app.config["SHOPPING_TRIP_SERVICE"]
+                )
         except DatabaseError:
             app.config["PLAN_SOURCE_FAILURE"] = "source_unavailable"
         except (sqlite3.Error, ValueError, KeyError):  # unreadable or corrupt file, bad timezone
@@ -241,6 +332,7 @@ def create_app(
 
     register_read_routes(app, _error)
     register_trip_routes(app, _error, is_local_request)
+    register_publish_routes(app, _error, is_local_request)
     register_health_route(app)
     static_root = static_dir or os.environ.get("MEALPLANNER_STATIC_DIR")
     if static_root:

@@ -2,11 +2,21 @@
 #   mkdir -p var/docker-data
 #   docker compose -f deploy/docker-compose.dev.yml up --build
 # Then open http://127.0.0.1:8080/. Data persists in var/docker-data (git-ignored).
+#
+# Publish button (phase 6b): the deploy key is var/secrets/deploy_key (git-ignored; chmod 600, owned by you).
+# A Compose `secrets: file:` keeps the host file's owner and mode, and ssh refuses a key the running user
+# cannot own, so the container runs as your uid (DEV_UID/DEV_GID, built into the image as the `app` user).
+# APP_REVISION is the meal-prep commit recorded as `app-ref`; it must exist on the public meal-prep repo:
+#   APP_REVISION=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.dev.yml up --build
 services:
   meal-prep:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        APP_UID: "${DEV_UID:-1000}"
+        APP_GID: "${DEV_GID:-1000}"
+        APP_REVISION: "${APP_REVISION:-}"
     image: meal-prep:dev
     user: "${DEV_UID:-1000}:${DEV_GID:-1000}"  # must own var/docker-data
     read_only: true
@@ -18,6 +28,7 @@ services:
     environment:
       MEALPLANNER_TIMEZONE: America/Bogota
       MEALPLANNER_TRUST_NETWORK_PEERS: "1"  # the loopback-only port mapping is the access control
+      MEALPLANNER_PUBLISH_REPO: git@github.com:jflopezo91/meal-plan.git
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -33,9 +44,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # secrets:   # phase 6b, as in docker-compose.yml
-    #   - deploy_key
+    secrets:
+      - deploy_key  # mounted at /run/secrets/deploy_key (MEALPLANNER_PUBLISH_KEY default)
 
-# secrets:
-#   deploy_key:
-#     file: ../var/secrets/deploy_key
+secrets:
+  deploy_key:
+    file: ../var/secrets/deploy_key

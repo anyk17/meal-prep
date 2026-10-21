@@ -5,7 +5,7 @@ Adapters implement these Protocols; the application never imports an adapter.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Protocol
 
 from ..domain.planner_inputs import PlannerInputs
@@ -16,6 +16,7 @@ from ..domain.weekly_plan import PlanRevision, Proposal, RetryRecord, WeeklyPlan
 
 if TYPE_CHECKING:  # annotation only; application.publication imports this module
     from .publication import PublicationBundle
+    from .publishing import DeploymentStatus, PublishedContent, PublishJob
 
 
 class PlannerInputReader(Protocol):
@@ -132,3 +133,46 @@ class PublicationWriter(Protocol):
     def write(self, bundle: "PublicationBundle") -> None:
         """Make the bundle the active publication, or raise PublicationError leaving the
         previously active publication untouched. The new publication becomes active last."""
+
+
+class PublicationRepository(Protocol):
+    """The public repository as a local working copy (implemented by adapters/git_publication).
+
+    The remote is authoritative: ``sync`` discards anything local that is not on it. Failures
+    raise ``PublishRepoError`` with a message that is safe to show (no paths, no secrets).
+    """
+
+    def sync(self) -> PublishedContent | None:
+        """Clone or fast-forward/reset to the remote main and return what it publishes (None if nothing)."""
+
+    def write(self, bundle: PublicationBundle, app_ref: str) -> None:
+        """Write ``publication/`` (new bundle, retention applied) and ``app-ref`` into the working copy."""
+
+    def commit_and_push(self, message: str) -> str:
+        """Commit the working copy changes, push to the remote main (never forced), return the commit SHA."""
+
+
+class DeploymentStatusReader(Protocol):
+    def status(self, commit_sha: str) -> DeploymentStatus:
+        """pending / success / failure of the Pages deployment for this commit.
+
+        Raises ``DeploymentStatusError`` when it cannot be determined right now."""
+
+
+class PublishJobRepository(Protocol):
+    """Private publication job records."""
+
+    def start(self, job: PublishJob, stale_before: datetime) -> None:
+        """Atomically insert a running job. A running job started before ``stale_before`` is marked
+        failed first; any other running job raises ``PublishInProgress``."""
+
+    def save(self, job: PublishJob) -> None:
+        """Replace the stored job with the same id."""
+
+    def get(self, job_id: str) -> PublishJob | None: ...
+
+    def latest(self) -> PublishJob | None:
+        """The most recently started job."""
+
+    def last_with_status(self, statuses: tuple[str, ...]) -> PublishJob | None:
+        """The most recently started job whose status is one of ``statuses``."""

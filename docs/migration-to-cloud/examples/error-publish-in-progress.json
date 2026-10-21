@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "publish_in_progress",
+    "message": "A publication is already running. Try again in a minute.",
+    "details": []
+  }
+}

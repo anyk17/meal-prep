@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "No publication job exists for the requested job_id.",
+    "details": []
+  }
+}

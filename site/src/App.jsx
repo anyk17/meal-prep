@@ -25,6 +25,7 @@ const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy
 const TripControls = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx'));
 const SwapDialog = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/SwapDialog.jsx'));
 const CreateTripBar = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx').then(module => ({ default: module.CreateTripBar })));
+const PublishView = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/PublishView.jsx'));
 const MonthFill = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx').then(module => ({ default: module.MonthFill })));
 
 function formatLocalDateTime(value) {
@@ -57,6 +58,7 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [canEditTrips, setCanEditTrips] = useState(false);
+  const [canPublish, setCanPublish] = useState(false);
   const [tripId, setTripId] = useState(null);
   const [tripNonce, setTripNonce] = useState(0);
   const [selectedPlans, setSelectedPlans] = useState([]);
@@ -131,8 +133,8 @@ function App() {
   // Ask the server whether this client may edit. Hiding controls is not authorization; the server enforces it.
   const refreshCapabilities = useCallback(async () => {
     if (!loadEditor) return;
-    try { const { createPlanEditor } = await loadEditor(); const caps = await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities(); setCanEdit(caps.canEditPlans); setCanEditTrips(caps.canEditShoppingTrips); }
-    catch { setCanEdit(false); setCanEditTrips(false); }
+    try { const { createPlanEditor } = await loadEditor(); const caps = await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities(); setCanEdit(caps.canEditPlans); setCanEditTrips(caps.canEditShoppingTrips); setCanPublish(caps.canPublish); }
+    catch { setCanEdit(false); setCanEditTrips(false); setCanPublish(false); }
   }, []);
   useEffect(() => { void refreshCapabilities(); }, [refreshCapabilities]);
 
@@ -144,6 +146,7 @@ function App() {
   };
   const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
   const showShopping = () => { setReview(null); setView('shopping'); };
+  const showPublish = () => { setReview(null); setView('publish'); };
   const openTrip = id => { setReview(null); setTripId(id); setView('shopping'); };
   const togglePlan = id => setSelectedPlans(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
   const showMonth = () => { setReview(null); setMonth(monthOf(weekStart)); setView('month'); };
@@ -243,9 +246,9 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div role="group" aria-label="View" className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-sm">
-          {['week', 'month', 'shopping'].map(name => (
-            <button key={name} aria-pressed={view === name} disabled={!!review && name !== 'week'} onClick={() => (name === 'month' ? showMonth() : name === 'shopping' ? showShopping() : openWeek(weekStart))}
-              className={`px-4 py-2 capitalize ${view === name ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'} disabled:opacity-50`}>{name}</button>
+          {['week', 'month', 'shopping', ...(canPublish && PublishView ? ['publish'] : [])].map(name => (
+            <button key={name} aria-pressed={view === name} disabled={!!review && name !== 'week'} onClick={() => (name === 'month' ? showMonth() : name === 'shopping' ? showShopping() : name === 'publish' ? showPublish() : openWeek(weekStart))}
+              className={`px-4 min-h-11 capitalize ${view === name ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'} disabled:opacity-50`}>{name}</button>
           ))}
         </div>
 
@@ -258,6 +261,12 @@ function App() {
             <CreateTripBar planIds={selectedPlans} reader={reader} onClear={() => setSelectedPlans([])}
               onCreated={trip => { setSelectedPlans([]); setMonthNonce(value => value + 1); openTrip(trip.trip_id); }}
               onProblem={() => { setSelectedPlans([]); setMonthNonce(value => value + 1); }} />
+          </Suspense>
+        )}
+
+        {view === 'publish' && canPublish && PublishView && (
+          <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
+            <PublishView today={todayIn(plan?.timezone)} />
           </Suspense>
         )}
 

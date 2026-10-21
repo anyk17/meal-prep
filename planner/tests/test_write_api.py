@@ -301,10 +301,10 @@ def test_bad_ids_rejected(client) -> None:
 
 
 def test_capabilities(client, tmp_path) -> None:
-    assert ok(client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": True, "can_edit_shopping_trips": True}
+    assert ok(client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": True, "can_edit_shopping_trips": True, "can_publish": False}
     json_app = create_app(week_start="2026-10-19")
     json_client = json_app.test_client()
-    assert ok(json_client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": False, "can_edit_shopping_trips": False}
+    assert ok(json_client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": False, "can_edit_shopping_trips": False, "can_publish": False}
 
 
 def test_json_mode_is_read_only(tmp_path) -> None:
