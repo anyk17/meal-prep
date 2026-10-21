@@ -14,7 +14,7 @@ An automated meal planning system that generates optimal weekly menus based on n
 ## Prerequisites
 
 -   **Python 3.10+** (for the planner)
--   **Node.js 18+** (for the UI)
+-   **Linux Node.js 22.12+** (for the UI; `.nvmrc` selects Node 22)
 
 ## Installation
 
@@ -27,13 +27,13 @@ python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-pip install -e planner
+pip install -e 'planner[api,dev]'
 ```
 
 ### 2. Setup the UI (React)
 ```bash
 cd site
-npm install
+npm ci
 cd ..
 ```
 
@@ -60,13 +60,23 @@ This command will:
 3.  Output `plan.json` and `shopping_list.json` directly to `site/public/`.
 
 ### Step 2: View the Plan
-Start the local development server to view your meal plan and shopping list.
+Start Flask from the repository root in one terminal:
+
+```bash
+.venv/bin/python -m mealplanner.api
+```
+
+In another terminal, start the frontend:
 
 ```bash
 cd site
-npm run dev
+npm run dev:api
 ```
-Open the URL shown (usually `http://localhost:5173`) in your browser.
+Open `http://127.0.0.1:5173/meal-prep/`. The current fixture is explicitly anchored to October 19–25, 2026. Restart Flask after generating new files.
+
+For the read-only static sample without Flask, use `npm run dev:static` instead. It displays the checked-in publication example, not the latest CLI output. Detailed setup, date configuration, validation, and migration phases are in the [migration plan](docs/migration-to-cloud/README.md#local-development-environment-wsllinux).
+
+This branch requires explicit frontend modes. Existing Generate Plan/Build Frontend GitHub workflows still use the old generic build command and cannot produce a deployable artifact from this branch yet; the real publication workflow is phase 6.
 
 ## Configuration
 
@@ -79,4 +89,4 @@ Open the URL shown (usually `http://localhost:5173`) in your browser.
 ## Troubleshooting
 
 -   **Optimization Failed**: If the solver cannot find a solution, try relaxing constraints in `data/rules.yml` (e.g., increase `max_recipe_uses_per_week` or `fish_dinner_max_per_week`).
--   **UI Not Updating**: Ensure you pointed the `generate-plan` command to `site/public` correctly in Step 1.
+-   **UI Not Updating**: In API mode, generate into `site/public`, restart Flask, then refresh the frontend. Static mode uses a separate prepared sample bundle.

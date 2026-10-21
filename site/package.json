@@ -4,10 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/run-vite.js dev",
+    "dev:api": "node scripts/run-vite.js dev api",
+    "dev:static": "node scripts/run-vite.js dev pages",
+    "build": "node scripts/run-vite.js build",
+    "build:api": "node scripts/run-vite.js build api",
+    "build:pages": "node scripts/run-vite.js build pages",
+    "test": "node --test tests/*.test.js",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview:pages": "node scripts/run-vite.js preview pages"
   },
   "dependencies": {
     "clsx": "^2.1.1",

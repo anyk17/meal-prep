@@ -1,13 +1,12 @@
 """Command-line interface for meal planner."""
 
 import sys
-import json
 from pathlib import Path
 
+from .generation import generate as generate_outputs
 from .load import load_data, validate_recipe_file
-from .solve import solve_plan
-from .shopping import generate_shopping_list
-from .render import render_plan
+from .render import render_plan_output, write_shopping_output
+from .yaml_input import YamlPlannerInputReader
 
 
 def validate_data(data_dir: Path) -> int:
@@ -31,26 +30,19 @@ def validate_data(data_dir: Path) -> int:
 def generate_plan(data_dir: Path, output_dir: Path, seed: int) -> int:
     """Generate plan and shopping list."""
     try:
-        # 1. Load data
+        # 1. Read and validate data through the YAML source adapter
         print(f"Loading data from {data_dir}...")
-        loader = load_data(data_dir)
+        inputs = YamlPlannerInputReader(data_dir).read()
         
-        # 2. Solve
+        # 2. Solve and construct DTOs in memory
         print(f"Generating plan with seed {seed}...")
-        solution = solve_plan(loader, seed)
+        generated = generate_outputs(inputs, seed)
         print("✓ Solution found!")
         
-        # 3. Generate shopping list
         print("Generating shopping list...")
-        shopping_list = generate_shopping_list(solution, loader)
-        
-        # 4. Render output
         print(f"Rendering output to {output_dir}...")
-        render_plan(solution, loader, seed, output_dir)
-        
-        # Write shopping list
-        with open(output_dir / "shopping_list.json", "w") as f:
-            f.write(shopping_list.model_dump_json(indent=2))
+        render_plan_output(generated.plan, output_dir)
+        write_shopping_output(generated.shopping_list, output_dir)
         print(f"✓ Wrote shopping_list.json to {output_dir}")
         
         return 0

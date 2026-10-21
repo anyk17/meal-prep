@@ -58,7 +58,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         cd planner
-        pip install -e .[dev]
+        pip install -e '.[api,dev]'
 
     - name: Validate recipe data set
       id: validate_data

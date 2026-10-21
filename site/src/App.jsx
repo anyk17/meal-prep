@@ -1,8 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { MealCard } from './components/MealCard';
 import { ShoppingList } from './components/ShoppingList';
 import { RecipeModal } from './components/RecipeModal';
 import { Utensils, Calendar, Moon, Sun } from 'lucide-react';
+import { createApiReader } from './readers/api';
+import { createStaticReader } from './readers/static';
+import { validatePair } from './readers/shared.js';
+
+const createReader = () => import.meta.env.VITE_READER_MODE === 'static'
+  ? createStaticReader('publication/index.json')
+  : createApiReader(import.meta.env.VITE_API_BASE_PATH || '/api/v1');
+let reader = createReader();
+const INITIAL_FROM = import.meta.env.VITE_DEFAULT_FROM || '2026-10-19';
+const INITIAL_TO = import.meta.env.VITE_DEFAULT_TO || '2026-10-25';
 
 // Map shorthand days to full names
 const DAYS = {
@@ -41,9 +51,11 @@ function formatLocalDateTime(value) {
     timeStyle: 'short'
   }).format(date);
 }
-
-function getGarbageCollectorLabel(date = new Date()) {
-  return date.getDate() % 2 === 0 ? 'J' : 'T';
+function getGarbageCollectorLabel(date = new Date()) { return date.getDate() % 2 === 0 ? 'J' : 'T'; }
+function readTheme() {
+  try { const saved = window.localStorage.getItem('theme'); if (saved === 'light' || saved === 'dark') return saved; } catch { /* browser storage may be disabled */ }
+  try { if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'; } catch { /* optional browser feature */ }
+  return 'light';
 }
 
 function App() {
@@ -52,17 +64,14 @@ function App() {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sourceContext, setSourceContext] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const requestGeneration = useRef(0);
+  const hasPlan = useRef(false);
+  const garbageCollector = getGarbageCollectorLabel();
 
   // Theme state
-  const [theme, setTheme] = useState(() => {
-    if (typeof window !== 'undefined' && localStorage.getItem('theme')) {
-      return localStorage.getItem('theme');
-    }
-    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
-    }
-    return 'light';
-  });
+  const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -71,42 +80,54 @@ function App() {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('theme', theme);
+    try { window.localStorage.setItem('theme', theme); } catch { /* browser storage may be disabled */ }
   }, [theme]);
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [planRes, shoppingRes] = await Promise.all([
-          fetch(`./plan.json?t=${Date.now()}`),
-          fetch(`./shopping_list.json?t=${Date.now()}`)
-        ]);
-
-        if (!planRes.ok || !shoppingRes.ok) {
-          throw new Error('Failed to load data files');
+  const loadData = useCallback(async (refresh = false) => {
+    const generation = ++requestGeneration.current;
+    setRefreshing(refresh);
+    if (!hasPlan.current) setLoading(true);
+    try {
+      const candidateReader = refresh && reader.mode === 'static' ? createReader() : reader;
+      if (refresh && candidateReader.mode === 'static') await candidateReader.refresh();
+      const range = { from: INITIAL_FROM, to: INITIAL_TO };
+      const result = await candidateReader.listPlans(range);
+      let selected = result.items.find(item => item.week_start === INITIAL_FROM) || result.items[0];
+      if (generation !== requestGeneration.current) return;
+      if (!selected) { reader = candidateReader; hasPlan.current=false; setPlan(null); setShoppingList(null); setSourceContext(candidateReader.context); setSelectedSlot(null); setError(null); return; }
+      let nextPlan, nextShop;
+      for (let attempt = 0; attempt < (candidateReader.mode === 'api' ? 2 : 1); attempt += 1) {
+        nextPlan = await candidateReader.getPlan(selected.plan_id);
+        try { nextShop = await candidateReader.getShoppingList(selected.plan_id, nextPlan.revision, nextPlan.snapshot_id); break; }
+        catch (err) {
+          if (err.code !== 'snapshot_changed' || attempt > 0 || candidateReader.mode !== 'api') throw err;
+          const refreshed = await candidateReader.listPlans(range);
+          selected = refreshed.items.find(item => item.plan_id === selected.plan_id) || refreshed.items.find(item => item.week_start === INITIAL_FROM) || refreshed.items[0];
+          if (!selected) throw err;
         }
-
-        const planData = await planRes.json();
-        const shoppingData = await shoppingRes.json();
-
-        setPlan(planData);
-        setShoppingList(shoppingData);
-      } catch (err) {
-        console.error(err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
       }
-    }
-
-    fetchData();
+      if (generation !== requestGeneration.current) return;
+      validatePair(nextPlan,nextShop);
+      reader = candidateReader;
+      hasPlan.current=true;
+      setPlan(nextPlan);
+      setShoppingList(nextShop);
+      setSourceContext(candidateReader.context);
+      setSelectedSlot(null);
+      setError(null);
+    } catch (err) {
+      if (generation !== requestGeneration.current) return;
+      setError(err?.message || 'Could not load the meal plan.');
+    } finally { if (generation === requestGeneration.current) { setLoading(false); setRefreshing(false); } }
   }, []);
 
-  if (loading) {
+  useEffect(() => { void loadData(); return () => { requestGeneration.current += 1; }; }, [loadData]);
+
+  if (loading && !plan) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="animate-pulse flex flex-col items-center gap-4">
@@ -117,7 +138,7 @@ function App() {
     );
   }
 
-  if (error) {
+  if (error && !plan) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-lg border border-red-100 dark:border-red-900/30 max-w-md text-center">
@@ -125,7 +146,7 @@ function App() {
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Error Loading Plan</h1>
           <p className="text-slate-600 dark:text-slate-400">{error}</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => loadData(true)}
             className="mt-6 px-6 py-2 bg-slate-900 dark:bg-slate-700 text-white rounded-lg hover:bg-slate-800 dark:hover:bg-slate-600 transition-colors"
           >
             Retry
@@ -135,14 +156,16 @@ function App() {
     );
   }
 
+  if (!plan) return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-8 text-center text-slate-700 dark:text-slate-200">{error ? `Unable to load plan: ${error}` : `${reader.mode === 'static' ? 'No published plan' : 'No plan'} for ${INITIAL_FROM}–${INITIAL_TO}.`}<button className="ml-4 underline" onClick={() => loadData(true)}>Refresh</button></div>;
+
+  const actualRange = `${plan.week_start} – ${plan.week_end}`;
+  const publicationDate = sourceContext?.exported_at ? `Snapshot as of ${formatLocalDateTime(sourceContext.exported_at)}` : 'Home plan';
   // Organize slots by day and meal
   const getSlot = (day, meal) => {
     return plan?.slots.find(s => s.day === day && s.meal === meal);
   };
 
   const isWeekend = (day) => WEEKEND_DAYS.has(day);
-
-  const garbageCollector = getGarbageCollectorLabel();
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans pb-20 transition-colors duration-200">
@@ -155,21 +178,20 @@ function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold leading-none text-slate-900 dark:text-white">Meal Prep</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Planner Iteration 3</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{actualRange}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-xs text-slate-400 font-mono hidden sm:block">
-              Seed: {plan.seed}
+              {publicationDate}<br />Seed: {plan.seed}
               <br />
               <span className="text-[10px] opacity-75">
                 {formatLocalDateTime(plan.generated_at)}
               </span>
               <br />
-              <span className="text-[10px] opacity-75">
-                Garbage Collector: {garbageCollector}
-              </span>
+              <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
+            <button onClick={() => loadData(true)} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
             <button
               onClick={toggleTheme}
               className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -180,6 +202,8 @@ function App() {
           </div>
         </div>
       </header>
+
+      {error && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} The displayed plan and groceries are still from the same snapshot.</div>}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -223,8 +247,9 @@ function App() {
                       </div>
                     ) : (
                       MEALS.map(meal => {
-                        const slot = getSlot(day, meal);
-                        if (!slot) return null;
+                        const dto = getSlot(day, meal);
+                        if (!dto) return null;
+                        const slot = { ...dto, recipeName: dto.recipe_name, proteinQty: dto.protein_quantity.value, proteinUnit: dto.protein_quantity.unit, carb: dto.carb ?? 'none', carbQty: dto.carb_quantity?.value, carbUnit: dto.carb_quantity?.unit, ingredients: dto.ingredients.map(i => ({ ...i, qty: i.quantity })) };
 
                         return (
                           <MealCard
@@ -272,7 +297,7 @@ function App() {
 
           {/* Shopping List Sidebar */}
           <div className="lg:col-span-1 h-fit sticky top-24">
-            <ShoppingList items={shoppingList} />
+            <ShoppingList items={shoppingList} plan={plan} mode={reader.mode} />
           </div>
         </div>
       </main>

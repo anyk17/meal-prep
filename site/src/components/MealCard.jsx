@@ -23,7 +23,7 @@ const PROTEIN_ICONS = {
 };
 
 export function MealCard({ slot, onClick }) {
-    const { recipeName, protein, carb, meal, proteinQty, carbQty } = slot;
+    const { recipeName, protein, carb, meal, proteinQty, proteinUnit, carbQty, carbUnit } = slot;
 
     const colorClass = PROTEIN_COLORS[protein] || PROTEIN_COLORS.default;
     const Icon = PROTEIN_ICONS[protein] || PROTEIN_ICONS.default;
@@ -50,12 +50,12 @@ export function MealCard({ slot, onClick }) {
             <div className="mt-auto pt-2 text-xs space-y-1">
                 <div className="flex items-center justify-between">
                     <span className="opacity-70">Protein:</span>
-                    <span className="font-mono font-bold">{proteinQty}g</span>
+                    <span className="font-mono font-bold">{proteinQty} {proteinUnit}</span>
                 </div>
-                {carb !== 'none' && carbQty && (
+                {carb !== 'none' && carbQty !== null && carbQty !== undefined && (
                     <div className="flex items-center justify-between">
                         <span className="opacity-70">Carb:</span>
-                        <span className="font-mono font-bold">{carbQty}g</span>
+                    <span className="font-mono font-bold">{carbQty} {carbUnit}</span>
                     </div>
                 )}
             </div>

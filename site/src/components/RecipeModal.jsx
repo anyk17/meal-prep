@@ -4,7 +4,7 @@ import { X, Utensils } from 'lucide-react';
 export function RecipeModal({ slot, onClose }) {
     if (!slot) return null;
 
-    const { recipeName, protein, carb, meal, day, proteinQty, carbQty, ingredients } = slot;
+    const { recipeName, protein, carb, meal, day, proteinQty, proteinUnit, carbQty, carbUnit, ingredients } = slot;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -36,10 +36,10 @@ export function RecipeModal({ slot, onClose }) {
                                 <span className="block text-xs text-gray-500 dark:text-slate-400 uppercase">Protein</span>
                                 <span className="font-medium capitalize text-slate-900 dark:text-white">{protein}</span>
                             </div>
-                            <span className="font-mono font-bold text-lg text-slate-900 dark:text-white">{proteinQty}g</span>
+                            <span className="font-mono font-bold text-lg text-slate-900 dark:text-white">{proteinQty} {proteinUnit}</span>
                         </div>
 
-                        {carb !== 'none' && carbQty && (
+                        {carb !== 'none' && carbQty !== null && carbQty !== undefined && (
                             <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
                                 <div className="p-2 bg-white dark:bg-slate-700 rounded-md shadow-sm">
                                     <span className="text-lg">🌾</span>
@@ -48,7 +48,7 @@ export function RecipeModal({ slot, onClose }) {
                                     <span className="block text-xs text-gray-500 dark:text-slate-400 uppercase">Carb</span>
                                     <span className="font-medium capitalize text-slate-900 dark:text-white">{carb}</span>
                                 </div>
-                                <span className="font-mono font-bold text-lg text-slate-900 dark:text-white">{carbQty}g</span>
+                                <span className="font-mono font-bold text-lg text-slate-900 dark:text-white">{carbQty} {carbUnit}</span>
                             </div>
                         )}
 

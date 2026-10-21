@@ -1,0 +1,221 @@
+{
+  "plan_id": "plan_2026_10_26",
+  "revision": 1,
+  "week_start": "2026-10-26",
+  "week_end": "2026-11-01",
+  "sections": {
+    "protein": [
+      {
+        "ingredient_id": "chicken",
+        "display": "Pollo",
+        "quantity": 720.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      },
+      {
+        "ingredient_id": "sausage",
+        "display": "Salchicha",
+        "quantity": 330.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      },
+      {
+        "ingredient_id": "fish_salmon",
+        "display": "Salmón",
+        "quantity": 100.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      },
+      {
+        "ingredient_id": "fish_tuna_fillet",
+        "display": "Atún en filete",
+        "quantity": 280.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      },
+      {
+        "ingredient_id": "beef",
+        "display": "Carne de res",
+        "quantity": 380.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      },
+      {
+        "ingredient_id": "fish_tuna_canned",
+        "display": "Atún en lata",
+        "quantity": 100.0,
+        "unit": "g",
+        "section": "protein",
+        "notes": null
+      }
+    ],
+    "vegetable": [
+      {
+        "ingredient_id": "cherry_tomato",
+        "display": "Tomate cherry",
+        "quantity": 200.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "spinach",
+        "display": "Espinaca",
+        "quantity": 160.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "carrot",
+        "display": "Zanahoria",
+        "quantity": 320.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "tomato",
+        "display": "Tomate",
+        "quantity": 370.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "asparagus",
+        "display": "Espárragos",
+        "quantity": 370.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "ginger",
+        "display": "Jengibre",
+        "quantity": 30.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "green_beans",
+        "display": "Habichuela",
+        "quantity": 170.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "broccoli",
+        "display": "Brócoli",
+        "quantity": 400.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "bell_pepper",
+        "display": "Pimentón",
+        "quantity": 300.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      },
+      {
+        "ingredient_id": "peas",
+        "display": "Arverja",
+        "quantity": 50.0,
+        "unit": "g",
+        "section": "vegetable",
+        "notes": null
+      }
+    ],
+    "condiment": [
+      {
+        "ingredient_id": "olives",
+        "display": "Aceitunas",
+        "quantity": 60.0,
+        "unit": "g",
+        "section": "condiment",
+        "notes": null
+      },
+      {
+        "ingredient_id": "tomato_sauce",
+        "display": "Salsa de tomate",
+        "quantity": 50.0,
+        "unit": "ml",
+        "section": "condiment",
+        "notes": null
+      },
+      {
+        "ingredient_id": "achiote",
+        "display": "Achiote",
+        "quantity": 5.0,
+        "unit": "g",
+        "section": "condiment",
+        "notes": null
+      }
+    ],
+    "dairy": [
+      {
+        "ingredient_id": "greek_yogurt",
+        "display": "Yogurt griego",
+        "quantity": 100.0,
+        "unit": "g",
+        "section": "dairy",
+        "notes": null
+      }
+    ],
+    "carb": [
+      {
+        "ingredient_id": "yuca",
+        "display": "Yuca",
+        "quantity": 70.0,
+        "unit": "g",
+        "section": "carb",
+        "notes": null
+      },
+      {
+        "ingredient_id": "lentils",
+        "display": "Lentejas",
+        "quantity": 55.0,
+        "unit": "g",
+        "section": "carb",
+        "notes": null
+      },
+      {
+        "ingredient_id": "rice",
+        "display": "Arroz",
+        "quantity": 80.0,
+        "unit": "g",
+        "section": "carb",
+        "notes": null
+      },
+      {
+        "ingredient_id": "platano_verde",
+        "display": "Plátano verde",
+        "quantity": 100.0,
+        "unit": "g",
+        "section": "carb",
+        "notes": null
+      }
+    ],
+    "fat": [
+      {
+        "ingredient_id": "sesame_seeds",
+        "display": "Ajonjolí",
+        "quantity": 15.0,
+        "unit": "g",
+        "section": "fat",
+        "notes": null
+      }
+    ]
+  },
+  "snapshot_id": "sha256:9b67a4e9106468935481e12785d392a7b0239fbbf2ed3d72d1c5fbca0a04defc"
+}

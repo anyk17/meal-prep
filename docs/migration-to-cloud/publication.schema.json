@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "publication.schema.json",
+  "title": "Static meal-plan publication metadata",
+  "description": "The root value is either the stable index file or one immutable publication manifest. Paths are relative to the file containing them; semantic validation checks publication and plan identity against path segments.",
+  "oneOf": [
+    { "$ref": "#/$defs/Index" },
+    { "$ref": "#/$defs/Manifest" }
+  ],
+  "$defs": {
+    "PublicationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "minLength": 1
+    },
+    "Index": {
+      "title": "Current publication index",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "publication_id", "manifest_path"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "publication_id": { "$ref": "#/$defs/PublicationId" },
+        "manifest_path": {
+          "type": "string",
+          "pattern": "^publications/[A-Za-z0-9][A-Za-z0-9_-]*/manifest\\.json$",
+          "description": "Relative to this index file; the publication directory must match publication_id."
+        }
+      }
+    },
+    "Manifest": {
+      "title": "Immutable publication manifest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "publication_id", "exported_at", "selected_months", "timezone", "plans"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "publication_id": { "$ref": "#/$defs/PublicationId" },
+        "exported_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Time the validated artifact was finalized, before upload or Pages deployment. It does not assert deployment success."
+        },
+        "selected_months": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Explicitly selected calendar months in YYYY-MM form."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IANA timezone used for the published meal dates."
+        },
+        "plans": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PublishedPlan" },
+          "description": "Current plans overlapping selected_months, including complete weeks that cross a month boundary. Empty means no saved plans were available for the selected months."
+        }
+      }
+    },
+    "PublishedPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "plan_path", "shopping_path"],
+      "properties": {
+        "summary": {
+          "$ref": "openapi.yaml#/components/schemas/PlanSummary"
+        },
+        "plan_path": {
+          "type": "string",
+          "pattern": "^plans/[A-Za-z0-9][A-Za-z0-9_-]*/plan\\.json$",
+          "description": "Relative to this immutable manifest. The directory segment must equal summary.plan_id."
+        },
+        "shopping_path": {
+          "type": "string",
+          "pattern": "^plans/[A-Za-z0-9][A-Za-z0-9_-]*/shopping-list\\.json$",
+          "description": "Relative to this immutable manifest. The directory segment must equal summary.plan_id."
+        }
+      }
+    }
+  }
+}

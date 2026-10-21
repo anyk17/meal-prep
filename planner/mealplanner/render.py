@@ -1,15 +1,14 @@
 """Plan rendering and output generation."""
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+
 from pydantic import BaseModel
 
-from .solve import MealPlanSolution
+from .config import ProteinType
+from .planner_inputs import PlannerInputs
 from .shopping import ShoppingList
-from .load import DataLoader
-from .config import ProteinType, IngredientKind
+from .solve import MealPlanSolution
 
 
 class IngredientItem(BaseModel):
@@ -50,17 +49,13 @@ class PlanOutput(BaseModel):
     derived: PlanDerivedStats
 
 
-def render_plan(
-    solution: MealPlanSolution, 
-    loader: DataLoader, 
+def build_plan_output(
+    solution: MealPlanSolution,
+    inputs: PlannerInputs,
     seed: int,
-    output_dir: Path
-) -> None:
-    """Render plan and shopping list to JSON files."""
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 1. Convert slots to output format
+    generated_at: str | None = None,
+) -> PlanOutput:
+    """Build the plan DTO entirely in memory from a solution and explicit inputs."""
     slots: list[PlanSlot] = []
     
     # Stats tracking
@@ -71,8 +66,8 @@ def render_plan(
     sorted_slots = sorted(
         solution.assignments.keys(),
         key=lambda s: (
-            loader.rules.week.days.index(s.split('_')[0]), 
-            loader.rules.week.meals.index(s.split('_')[1])
+            inputs.rules.week.days.index(s.split('_')[0]),
+            inputs.rules.week.meals.index(s.split('_')[1])
         )
     )
     
@@ -87,7 +82,7 @@ def render_plan(
         protein_counts[pt.value] += 1
         
         # Resolve protein quantity
-        protein_portions = loader.rules.protein_portions_g[pt]
+        protein_portions = inputs.rules.protein_portions_g[pt]
         protein_qty = getattr(protein_portions, meal, 0)
         
         # Track carb and resolve carb quantity
@@ -97,16 +92,16 @@ def render_plan(
             carb = variant.carb_ingredient_id
             carb_counts[carb] = carb_counts.get(carb, 0) + 1
             # Get carb quantity from ingredients.yml
-            if carb in loader.ingredients:
-                carb_qty = loader.ingredients[carb].default_qty_g or 0
+            if carb in inputs.ingredients:
+                carb_qty = inputs.ingredients[carb].default_qty_g or 0
         
         # Build ingredients list
         ingredients_list = []
         for ing in variant.recipe.ingredients:
-            if ing.item not in loader.ingredients:
+            if ing.item not in inputs.ingredients:
                 continue
             
-            ingredient_def = loader.ingredients[ing.item]
+            ingredient_def = inputs.ingredients[ing.item]
             
             # Resolve quantity
             if ing.qty == "@portion":
@@ -129,8 +124,8 @@ def render_plan(
             ))
         
         # Add carb ingredient if present
-        if variant.carb_ingredient_id and variant.carb_ingredient_id in loader.ingredients:
-            carb_def = loader.ingredients[variant.carb_ingredient_id]
+        if variant.carb_ingredient_id and variant.carb_ingredient_id in inputs.ingredients:
+            carb_def = inputs.ingredients[variant.carb_ingredient_id]
             ingredients_list.append(IngredientItem(
                 item=variant.carb_ingredient_id,
                 display=carb_def.display,
@@ -159,10 +154,9 @@ def render_plan(
             extendedFromLunch=is_extended
         ))
         
-    # 2. Create Plan object
-    plan = PlanOutput(
+    return PlanOutput(
         seed=seed,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
         slots=slots,
         derived=PlanDerivedStats(
             protein_counts=protein_counts,
@@ -170,18 +164,43 @@ def render_plan(
         )
     )
     
-    # 3. Write plan.json
+def write_plan_output(plan: PlanOutput, output_dir: Path) -> None:
+    """Write a previously built plan DTO to the legacy JSON location."""
+    output_dir.mkdir(parents=True, exist_ok=True)
     with open(output_dir / "plan.json", "w") as f:
         f.write(plan.model_dump_json(indent=2))
-        
+
+
+def render_plan(
+    solution: MealPlanSolution,
+    inputs: PlannerInputs,
+    seed: int,
+    output_dir: Path,
+) -> PlanOutput:
+    """Build and write plan.json, retaining the legacy console summary."""
+    plan = build_plan_output(solution, inputs, seed)
+    render_plan_output(plan, output_dir)
+    return plan
+
+
+def render_plan_output(plan: PlanOutput, output_dir: Path) -> None:
+    """Write plan.json and print its established statistics summary."""
+    write_plan_output(plan, output_dir)
     print(f"✓ Wrote plan.json to {output_dir}")
     
     # 4. Write stats summary to console
     print("\nPlan Statistics:")
     print("Protein Counts:")
-    for pt, count in protein_counts.items():
+    for pt, count in plan.derived.protein_counts.items():
         print(f"  {pt}: {count}")
         
     print("\nCarb Counts:")
-    for carb, count in carb_counts.items():
+    for carb, count in plan.derived.carb_counts.items():
         print(f"  {carb}: {count}")
+
+
+def write_shopping_output(shopping_list: ShoppingList, output_dir: Path) -> None:
+    """Write shopping_list.json using the established DTO casing and location."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "shopping_list.json", "w") as f:
+        f.write(shopping_list.model_dump_json(indent=2))

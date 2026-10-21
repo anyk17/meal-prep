@@ -2,21 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { Check, ShoppingCart } from 'lucide-react';
 
-export function ShoppingList({ items }) {
-    const [checkedItems, setCheckedItems] = useState(() => {
-        const saved = localStorage.getItem('shopping_checked');
-        return saved ? JSON.parse(saved) : {};
-    });
+function readChecks(storageKey) {
+    try { const saved = window.localStorage.getItem(storageKey); const parsed = saved ? JSON.parse(saved) : {}; return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; }
+    catch { return {}; }
+}
+
+export function ShoppingList({ items, plan, mode }) {
+    const storageKey = `shopping_checked:${mode}:${plan?.plan_id}:${plan?.revision}:${plan?.snapshot_id}`;
+    const [checkState, setCheckState] = useState(() => ({ key: storageKey, values: readChecks(storageKey) }));
+    const checkedItems = checkState.key === storageKey ? checkState.values : readChecks(storageKey);
 
     useEffect(() => {
-        localStorage.setItem('shopping_checked', JSON.stringify(checkedItems));
-    }, [checkedItems]);
+        if (checkState.key !== storageKey) return;
+        try { window.localStorage.setItem(storageKey, JSON.stringify(checkState.values)); } catch { /* browser storage may be disabled */ }
+    }, [checkState, storageKey]);
 
     const toggleItem = (itemKey) => {
-        setCheckedItems(prev => ({
-            ...prev,
-            [itemKey]: !prev[itemKey]
-        }));
+        setCheckState(previous => {
+            const current = previous.key === storageKey ? previous.values : readChecks(storageKey);
+            return { key: storageKey, values: { ...current, [itemKey]: !current[itemKey] } };
+        });
     };
 
     // If undefined or loading
@@ -29,7 +34,9 @@ export function ShoppingList({ items }) {
     }));
 
     // Calculate total items count
-    const totalItemsCount = categories.flatMap(c => c.items).length;
+    const allItems = categories.flatMap(c => c.items);
+    const totalItemsCount = allItems.length;
+    const checkedCount = allItems.filter(item => checkedItems[item.ingredient_id]).length;
 
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-gray-200 dark:border-slate-800 overflow-hidden h-full flex flex-col transition-colors duration-200">
@@ -39,10 +46,11 @@ export function ShoppingList({ items }) {
                     Shopping List
                 </h2>
                 <span className="text-xs bg-slate-700 dark:bg-slate-800 px-2 py-1 rounded-full">
-                    {Object.values(checkedItems).filter(Boolean).length} / {totalItemsCount}
+                    {checkedCount} / {totalItemsCount}
                 </span>
             </div>
 
+            {mode === 'static' && <p className="px-4 py-2 text-xs text-slate-500">Checkmarks are saved on this device and do not sync.</p>}
             <div className="divide-y divide-gray-100 dark:divide-slate-800 flex-1 overflow-y-auto bg-white dark:bg-slate-900">
                 {categories.map((category) => (
                     <div key={category.category} className="p-4">
@@ -51,7 +59,7 @@ export function ShoppingList({ items }) {
                         </h3>
                         <ul className="space-y-2">
                             {category.items.map((item) => {
-                                const itemKey = item.item; // Use stable ID
+                                const itemKey = item.ingredient_id;
                                 return (
                                     <li
                                         key={itemKey}

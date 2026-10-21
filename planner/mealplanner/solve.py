@@ -1,13 +1,12 @@
 """Solver constraint implementation."""
 
-from typing import Optional
 from ortools.sat.python import cp_model
 from pydantic import BaseModel
 
 from .config import Rules, MealType, ProteinType, IngredientKind, Ingredient
 from .model import PlannerModel, Slot, create_model
 from .variants import RecipeVariant, expand_variants
-from .load import DataLoader
+from .planner_inputs import PlannerInputs
 
 
 class MealPlanSolution(BaseModel):
@@ -302,25 +301,25 @@ def add_extend_to_dinner_constraints(model: PlannerModel, rules: Rules) -> None:
                 model.model.Add(sum(lunch_vars) == sum(dinner_vars))
 
 
-def solve_plan(loader: DataLoader, seed: int = 42) -> MealPlanSolution:
+def solve_plan(inputs: PlannerInputs, seed: int = 42) -> MealPlanSolution:
     """Generate a meal plan."""
     
     # 1. Expand variants
-    variants = expand_variants(loader.recipes, loader.ingredients)
+    variants = expand_variants(dict(inputs.recipes), dict(inputs.ingredients))
     
     # 2. Create model
-    planner_model = create_model(loader.rules, variants)
+    planner_model = create_model(inputs.rules, variants)
     
     # 3. Add constraints
-    add_weekly_protein_constraints(planner_model, loader.rules)
-    add_consecutive_protein_constraints(planner_model, loader.rules)
-    add_fish_dinner_constraints(planner_model, loader.rules)
-    add_meal_carb_rules(planner_model, loader.rules)
-    add_lunch_carb_required(planner_model, loader.rules)
-    add_no_consecutive_same_carb(planner_model, loader.rules)
-    add_carb_frequency_constraints(planner_model, loader.ingredients)
-    add_recipe_frequency_constraints(planner_model, loader.rules)
-    add_extend_to_dinner_constraints(planner_model, loader.rules)
+    add_weekly_protein_constraints(planner_model, inputs.rules)
+    add_consecutive_protein_constraints(planner_model, inputs.rules)
+    add_fish_dinner_constraints(planner_model, inputs.rules)
+    add_meal_carb_rules(planner_model, inputs.rules)
+    add_lunch_carb_required(planner_model, inputs.rules)
+    add_no_consecutive_same_carb(planner_model, inputs.rules)
+    add_carb_frequency_constraints(planner_model, inputs.ingredients)
+    add_recipe_frequency_constraints(planner_model, inputs.rules)
+    add_extend_to_dinner_constraints(planner_model, inputs.rules)
     
     # 4. Solve
     solver = cp_model.CpSolver()

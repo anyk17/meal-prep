@@ -1,12 +1,12 @@
 """Shopping list generation."""
 
 from collections import defaultdict
-from pydantic import BaseModel
 from typing import Optional
 
-from .config import Rules, Ingredient, IngredientKind, ProteinType
+from pydantic import BaseModel
+
+from .planner_inputs import PlannerInputs
 from .solve import MealPlanSolution
-from .load import DataLoader
 
 
 class ShoppingItem(BaseModel):
@@ -28,7 +28,7 @@ class ShoppingList(BaseModel):
 
 
 def generate_shopping_list(
-    solution: MealPlanSolution, loader: DataLoader
+    solution: MealPlanSolution, inputs: PlannerInputs
 ) -> ShoppingList:
     """Generate shopping list from meal plan."""
     
@@ -52,7 +52,7 @@ def generate_shopping_list(
             if ing.qty == "@portion":
                 # Resolve protein portion
                 protein_type = base_recipe.tags.primary_protein
-                portions = loader.rules.protein_portions_g[protein_type]
+                portions = inputs.rules.protein_portions_g[protein_type]
                 qty = getattr(portions, meal_name, 0)
                 
             elif ing.qty_g:
@@ -70,15 +70,15 @@ def generate_shopping_list(
             carb_id = variant.carb_ingredient_id
             
             # Resolve carb portion from ingredients.yml
-            if carb_id in loader.ingredients:
-                ingredient = loader.ingredients[carb_id]
+            if carb_id in inputs.ingredients:
+                ingredient = inputs.ingredients[carb_id]
                 qty = ingredient.default_qty_g or 0
                 
                 if qty > 0:
                     aggregated[carb_id] += qty
                 
     # 4. Remove pantry items
-    for pantry_item in loader.pantry:
+    for pantry_item in inputs.pantry:
         if pantry_item in aggregated:
             del aggregated[pantry_item]
             
@@ -86,11 +86,11 @@ def generate_shopping_list(
     items_by_section: dict[str, list[ShoppingItem]] = defaultdict(list)
     
     for ing_id, qty in aggregated.items():
-        if ing_id not in loader.ingredients:
+        if ing_id not in inputs.ingredients:
              # Should not happen due to validation
              continue
              
-        ingredient = loader.ingredients[ing_id]
+        ingredient = inputs.ingredients[ing_id]
         
         item = ShoppingItem(
             item=ing_id,

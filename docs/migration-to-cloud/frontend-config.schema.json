@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frontend-config.schema.json",
+  "title": "Meal planner frontend read mode configuration",
+  "description": "Exactly one trusted build configuration is selected. API mode is same-origin. Static mode reads a publication index and does not configure an API URL.",
+  "oneOf": [
+    {
+      "title": "Same-origin API mode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "api_base_path"],
+      "properties": {
+        "mode": { "const": "api" },
+        "api_base_path": { "const": "/api/v1" }
+      }
+    },
+    {
+      "title": "Static publication mode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "publication_index_path"],
+      "properties": {
+        "mode": { "const": "static" },
+        "publication_index_path": { "const": "publication/index.json" }
+      }
+    }
+  ]
+}

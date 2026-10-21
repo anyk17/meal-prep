@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "publication_id": "pub_2026_10_21_01",
+  "exported_at": "2026-10-21T15:00:00Z",
+  "selected_months": [
+    "2026-10",
+    "2026-11"
+  ],
+  "timezone": "America/Bogota",
+  "plans": [
+    {
+      "summary": {
+        "plan_id": "plan_2026_10_19",
+        "week_start": "2026-10-19",
+        "week_end": "2026-10-25",
+        "timezone": "America/Bogota",
+        "revision": 1,
+        "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
+        "generated_at": "2026-04-02T14:11:40.743512+00:00",
+        "seed": 5
+      },
+      "plan_path": "plans/plan_2026_10_19/plan.json",
+      "shopping_path": "plans/plan_2026_10_19/shopping-list.json"
+    },
+    {
+      "summary": {
+        "plan_id": "plan_2026_10_26",
+        "week_start": "2026-10-26",
+        "week_end": "2026-11-01",
+        "timezone": "America/Bogota",
+        "revision": 1,
+        "snapshot_id": "sha256:9b67a4e9106468935481e12785d392a7b0239fbbf2ed3d72d1c5fbca0a04defc",
+        "generated_at": "2026-04-02T14:11:40.743512+00:00",
+        "seed": 5
+      },
+      "plan_path": "plans/plan_2026_10_26/plan.json",
+      "shopping_path": "plans/plan_2026_10_26/shopping-list.json"
+    }
+  ]
+}
