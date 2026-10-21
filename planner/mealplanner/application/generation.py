@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 
 from ..domain.planner_inputs import PlannerInputs
-from ..solver.solve import MealPlanSolution, solve_plan
+from ..domain.solution import MealPlanSolution
 from .plan_output import PlanOutput, build_plan_output
+from .ports import PlanGenerator
 from .shopping import ShoppingList, generate_shopping_list
 
 
@@ -19,12 +20,12 @@ class GeneratedPlan:
 
 def generate(
     inputs: PlannerInputs,
+    generator: PlanGenerator,
     seed: int = 42,
     generated_at: str | None = None,
-    max_time_seconds: float | None = None,
 ) -> GeneratedPlan:
-    """Solve and construct all output DTOs without writing files."""
-    solution = solve_plan(inputs, seed, max_time_seconds)
+    """Generate a solution through the port and construct all output DTOs without writing files."""
+    solution = generator.generate(inputs, seed)
     shopping_list = generate_shopping_list(solution, inputs)
     plan = build_plan_output(solution, inputs, seed, generated_at=generated_at)
     return GeneratedPlan(solution=solution, plan=plan, shopping_list=shopping_list)

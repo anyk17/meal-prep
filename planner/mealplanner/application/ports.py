@@ -10,6 +10,7 @@ from typing import Protocol
 
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.snapshot import JsonObject
+from ..domain.solution import MealPlanSolution
 from ..domain.weekly_plan import PlanRevision, Proposal, RetryRecord, WeeklyPlan
 
 
@@ -18,6 +19,18 @@ class PlannerInputReader(Protocol):
 
     def read(self) -> PlannerInputs:
         """Read and validate one complete planner input set."""
+
+
+class PlanGenerator(Protocol):
+    """Engine that proposes one weekly solution for explicit inputs (implemented by adapters/ortools).
+
+    The result is only a candidate: the application checks it against
+    domain/weekly_rules.py before it can become a revision. Raises
+    NoFeasiblePlan (or any exception) when no plan can be produced.
+    """
+
+    def generate(self, inputs: PlannerInputs, seed: int) -> MealPlanSolution:
+        """Return a candidate solution for the seed."""
 
 
 class PlanReadRepository(Protocol):

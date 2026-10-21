@@ -11,10 +11,9 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1] / PACKAGE
 # layer -> layers it may import (itself is always allowed)
 ALLOWED: dict[str, set[str]] = {
     "domain": set(),
-    "solver": {"domain"},
-    "application": {"domain", "solver"},
+    "application": {"domain"},
     "adapters": {"domain", "application"},
-    "entrypoints": {"domain", "solver", "application", "adapters", "entrypoints"},
+    "entrypoints": {"domain", "application", "adapters", "entrypoints"},
 }
 
 # Third-party / stdlib modules the domain layer must not touch (I/O, frameworks, solver).
@@ -116,6 +115,27 @@ def test_domain_has_no_io_or_framework_imports() -> None:
                     f"{path.relative_to(PACKAGE_ROOT.parent)}:{line}: domain must not import '{target}'"
                 )
     assert not violations, "Domain purity violations:\n" + "\n".join(violations)
+
+
+def test_only_adapters_import_ortools() -> None:
+    """The OR-Tools engine is an adapter behind the PlanGenerator port."""
+    violations = []
+    for path in _modules():
+        layer = _layer(_module_name(path))
+        for line, target in _imports(path):
+            if target.split(".")[0] == "ortools" and not (
+                layer == "adapters" and "ortools" in path.relative_to(PACKAGE_ROOT).parts[:2]
+            ):
+                violations.append(f"{path.relative_to(PACKAGE_ROOT.parent)}:{line}: imports '{target}'")
+    assert not violations, "ortools may only be imported by adapters/ortools:\n" + "\n".join(violations)
+
+
+def test_application_and_domain_are_solver_free() -> None:
+    for layer in ("domain", "application"):
+        for path in sorted((PACKAGE_ROOT / layer).rglob("*.py")):
+            for line, target in _imports(path):
+                assert not target.startswith("mealplanner.adapters"), f"{path}:{line} imports {target}"
+                assert target.split(".")[0] != "ortools", f"{path}:{line} imports {target}"
 
 
 def test_import_resolver_handles_relative_imports(tmp_path: Path) -> None:

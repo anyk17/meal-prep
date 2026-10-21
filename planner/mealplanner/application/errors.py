@@ -15,3 +15,7 @@ class PlanNotFound(ReadError):
 
 class SnapshotChanged(ReadError):
     """The supplied shopping identity does not match the current snapshot."""
+
+
+class NoFeasiblePlan(Exception):
+    """The plan generator found no plan satisfying the weekly rules."""

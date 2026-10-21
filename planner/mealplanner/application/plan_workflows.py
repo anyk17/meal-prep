@@ -6,6 +6,7 @@ transaction; commits go through the repository's atomic append_revision.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from collections.abc import Callable
@@ -14,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.snapshot import PlanSnapshot, normalize_snapshot
+from ..domain.weekly_rules import check_weekly_rules
 from ..domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
@@ -35,13 +37,15 @@ from ..domain.weekly_plan import (
     diff_snapshots,
     fingerprint,
     input_basis,
+    require_weekly_rules,
     stamp_revision,
 )
 from .errors import InvalidRequest, PlanNotFound
-from .generation import GeneratedPlan, generate
-from .ports import PlannerInputReader, PlanWorkflowRepository
+from .generation import generate
+from .ports import PlanGenerator, PlannerInputReader, PlanWorkflowRepository
 
-Generator = Callable[[PlannerInputs, int, str | None], GeneratedPlan]
+logger = logging.getLogger(__name__)
+
 Clock = Callable[[], datetime]  # must return a timezone-aware datetime
 
 DEFAULT_PROPOSAL_TTL = timedelta(minutes=30)
@@ -55,7 +59,7 @@ class PlanWorkflowService:
         repository: PlanWorkflowRepository,
         input_reader: PlannerInputReader,
         clock: Clock,
-        generator: Generator = generate,
+        generator: PlanGenerator,
         timezone: str = "America/Bogota",
         proposal_ttl: timedelta = DEFAULT_PROPOSAL_TTL,
         id_factory: Callable[[], str] = lambda: uuid.uuid4().hex,
@@ -195,8 +199,10 @@ class PlanWorkflowService:
             self._require_future_week(plan)
             if self._clock() >= proposal.expires_at:
                 raise ProposalExpired(proposal_id)
-            if input_basis(self._read_inputs()) != proposal.input_basis:
+            inputs = self._read_inputs()
+            if input_basis(inputs) != proposal.input_basis:
                 raise InputBasisChanged("recipes, rules, or pantry changed since the preview")
+            require_weekly_rules(proposal.snapshot, inputs)
             if proposal.is_identical:
                 retry = RetryRecord(
                     plan_id, retry_id, fp, plan.current_revision, changed=False
@@ -235,6 +241,7 @@ class PlanWorkflowService:
             previous = self._repo.get_revision(plan_id, plan.current_revision - 1)
             assert previous is not None
             restored = stamp_revision(previous.snapshot, plan.current_revision + 1, previous.pantry)
+            self._recheck_restored(previous, restored)
             return self._append(
                 plan, restored, previous.pantry, previous.input_basis, "undo", retry_id, fp, None
             )
@@ -261,6 +268,23 @@ class PlanWorkflowService:
         if proposal_id is not None:
             self._repo.delete_proposal(proposal_id)
         return MutationResult(plan.plan_id, new_rev, snapshot.plan["snapshot_id"], True)
+
+    def _recheck_restored(self, previous: PlanRevision, restored: PlanSnapshot) -> None:
+        """Undo restores historical content. If the inputs are unchanged since that revision,
+        the content must still satisfy the rules (a stored violation is a bug: refuse). If
+        recipes, rules or pantry changed, the old content was valid under the old inputs: it is
+        restored as-is and any violation under the current rules is only logged."""
+        inputs = self._read_inputs()
+        if input_basis(inputs) == previous.input_basis:
+            require_weekly_rules(restored, inputs)
+            return
+        violations = check_weekly_rules(restored, inputs)
+        if violations:
+            logger.warning(
+                "undo of %s restores content that breaks current rules: %s",
+                previous.plan_id,
+                "; ".join(f"{v.rule}: {v.message}" for v in violations),
+            )
 
     def _replay(self, plan_id: str, retry_id: str, fp: str) -> MutationResult | None:
         if not retry_id:
@@ -308,8 +332,8 @@ class PlanWorkflowService:
 
     def _solve(self, inputs: PlannerInputs, seed: int, week_start: date) -> PlanSnapshot:
         try:
-            result = self._generator(inputs, seed, self._clock().isoformat())
-            return normalize_snapshot(
+            result = generate(inputs, self._generator, seed, self._clock().isoformat())
+            snapshot = normalize_snapshot(
                 result.plan.model_dump(),
                 result.shopping_list.model_dump(),
                 set(inputs.pantry),
@@ -318,6 +342,8 @@ class PlanWorkflowService:
             )
         except Exception as exc:  # solver infeasible, normalisation invalid, ...
             raise GenerationFailed(f"plan generation failed: {exc}") from exc
+        require_weekly_rules(snapshot, inputs)  # a violating candidate is never stored
+        return snapshot
 
     @staticmethod
     def _check_stable_ids(current: PlanSnapshot, proposed: PlanSnapshot) -> None:

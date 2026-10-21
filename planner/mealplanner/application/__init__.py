@@ -1,1 +1,1 @@
-"""Application layer: use cases and ports; may import domain and solver, never adapters or entrypoints."""
+"""Application layer: use cases and ports; may import domain only, never adapters, ortools or entrypoints."""

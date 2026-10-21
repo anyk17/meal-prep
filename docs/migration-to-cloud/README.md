@@ -374,5 +374,5 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Static checkmarks | Device-local and never exported/written back | phase 2 |
 | Home checkmarks | Browser-local first; shared DB state in phase 4 | phase 4 |
 | Cross-week rules | No new adjacency rule assumed | phase 4 |
-| Replacement | Preserve unrelated meals; explain infeasibility | phase 5 |
+| Replacement | Preserve unrelated meals; explain infeasibility; candidates must satisfy `domain/weekly_rules.py` (same specifications as generation, solver-independent) | phase 5 |
 | Costs | Verify NAS, power, storage, GitHub plan, domain, transfer, and tooling at launch | before phase 6 |

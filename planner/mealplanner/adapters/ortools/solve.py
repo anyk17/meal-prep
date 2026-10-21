@@ -1,22 +1,12 @@
-"""Solver constraint implementation."""
+"""CP-SAT encoding of the weekly rules (the business definition is domain/weekly_rules.py)."""
 
 from ortools.sat.python import cp_model
-from pydantic import BaseModel
-
-from ..domain.catalog import Rules, MealType, ProteinType, IngredientKind, Ingredient
+from ...domain.catalog import Rules, MealType, ProteinType, IngredientKind, Ingredient
 from .model import PlannerModel, Slot, create_model
-from ..domain.variants import RecipeVariant, expand_variants
-from ..domain.planner_inputs import PlannerInputs
-
-
-class MealPlanSolution(BaseModel):
-    """A valid meal plan solution."""
-    
-    # Map slot ID -> Chosen Variant
-    assignments: dict[str, RecipeVariant]
-    
-    class Config:
-        arbitrary_types_allowed = True
+from ...domain.variants import RecipeVariant, expand_variants
+from ...domain.planner_inputs import PlannerInputs
+from ...domain.solution import MealPlanSolution
+from ...application.errors import NoFeasiblePlan
 
 
 def add_weekly_protein_constraints(model: PlannerModel, rules: Rules) -> None:
@@ -98,18 +88,13 @@ def add_fish_dinner_constraints(model: PlannerModel, rules: Rules) -> None:
     # Constraint 3: Max total fish dinners
     model.model.Add(sum(fish_vars_by_day) <= rules.constraints.fish_dinner_max_per_week)
     
-    # Constraint 4: Max consecutive fish dinners (sliding window)
-    window_size = 3 # d, d+1, d+2 (max 2 means sum <= 2)
-    # The requirement is "max 2 consecutive", meaning NO 3 in a row.
-    # So sum of any 3 consecutive days <= 2
-    
-    for i in range(len(fish_vars_by_day) - 2):
-        model.model.Add(
-            fish_vars_by_day[i] + 
-            fish_vars_by_day[i+1] + 
-            fish_vars_by_day[i+2] 
-            <= rules.constraints.fish_dinner_max_consecutive
-        )
+    # Constraint 4: Max consecutive fish dinners (sliding window).
+    # A run longer than N is forbidden, i.e. any N+1 consecutive days hold at most N fish dinners.
+    max_run = rules.constraints.fish_dinner_max_consecutive
+    window_size = max_run + 1
+
+    for i in range(len(fish_vars_by_day) - window_size + 1):
+        model.model.Add(sum(fish_vars_by_day[i:i + window_size]) <= max_run)
 
 
 def add_meal_carb_rules(model: PlannerModel, rules: Rules) -> None:
@@ -345,4 +330,4 @@ def solve_plan(
         return MealPlanSolution(assignments=assignments)
         
     else:
-        raise RuntimeError("No feasible solution found")
+        raise NoFeasiblePlan("No feasible solution found")

@@ -48,6 +48,13 @@ IDEMPOTENT_PATHS = {
     "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept",
     "/api/v1/plans/{plan_id}/undo",
 }
+# Operations whose 422 must document the weekly-rule failure (error code rule_violation).
+RULE_VIOLATION_OPERATIONS = {
+    ("/api/v1/plans", "post"),
+    ("/api/v1/plans/{plan_id}/proposals", "post"),
+    ("/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept", "post"),
+    ("/api/v1/plans/{plan_id}/undo", "post"),
+}
 HTTP_METHODS = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -316,6 +323,33 @@ def check_contract(spec, checks):
         except jsonschema.SchemaError as e:
             checks.errors.append(f"component schema {name} is invalid: {e.message}")
     operation_examples(spec, checks)
+    check_rule_violation(spec, checks)
+
+
+def check_rule_violation(spec, checks):
+    """rule_violation is a documented 422 with rule-code details on every candidate-producing write."""
+    enum = spec["components"]["schemas"]["ErrorResponse"]["properties"]["error"]["properties"]["code"]["enum"]
+    checks.require("rule_violation" in enum, "ErrorResponse code enum must include rule_violation")
+    for path, method in sorted(RULE_VIOLATION_OPERATIONS):
+        response = spec["paths"].get(path, {}).get(method, {}).get("responses", {}).get("422")
+        examples = (
+            dereference(spec, response or {}).get("content", {}).get("application/json", {}).get("examples", {})
+        )
+        external = examples.get("ruleViolation", {}).get("externalValue")
+        checks.require(
+            external == "examples/error-rule-violation.json",
+            f"{method.upper()} {path}: 422 must carry the ruleViolation example",
+        )
+    example = EXAMPLES / "error-rule-violation.json"
+    if example.is_file():
+        error = load_json(example).get("error", {})
+        checks.require(error.get("code") == "rule_violation", "rule violation example must use code rule_violation")
+        details = error.get("details", [])
+        checks.require(
+            bool(details)
+            and all(re.fullmatch(r"[a-z][a-z0-9_]*", d.get("field", "")) for d in details),
+            "rule violation example details must list field = snake_case rule code",
+        )
 
 
 def fixture_examples():
@@ -695,6 +729,12 @@ def self_test_contract(spec):
         "cacheable response": lambda d: d["components"]["responses"]["WriteForbidden"][
             "headers"
         ]["Cache-Control"]["schema"].__setitem__("const", "public"),
+        "undocumented rule_violation code": lambda d: d["components"]["schemas"][
+            "ErrorResponse"
+        ]["properties"]["error"]["properties"]["code"]["enum"].remove("rule_violation"),
+        "missing rule_violation example": lambda d: d["paths"]["/api/v1/plans"]["post"][
+            "responses"
+        ]["422"]["content"]["application/json"]["examples"].pop("ruleViolation"),
         "missing 403": lambda d: d["paths"]["/api/v1/plans/{plan_id}/undo"]["post"][
             "responses"
         ].pop("403"),

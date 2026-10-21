@@ -14,6 +14,7 @@ import pytest
 from mealplanner.entrypoints.http.app import create_app
 from mealplanner.entrypoints.db_cli import backup, import_fixture, import_inputs, restore
 from mealplanner.entrypoints.db_cli import main as db_main
+from mealplanner.adapters.ortools import OrToolsPlanGenerator
 from mealplanner.application.generation import generate
 from mealplanner.adapters.json_snapshot import JsonPlanReadRepository
 from mealplanner.domain.weekly_plan import (
@@ -114,8 +115,8 @@ def test_inputs_round_trip_equal_to_yaml(imported: Path) -> None:
 
 
 def test_generation_identical_from_both_readers(imported: Path) -> None:
-    a = generate(YAML_INPUTS, 42, "2026-10-19T00:00:00Z")
-    b = generate(SqlitePlannerInputReader(imported).read(), 42, "2026-10-19T00:00:00Z")
+    a = generate(YAML_INPUTS, OrToolsPlanGenerator(), 42, "2026-10-19T00:00:00Z")
+    b = generate(SqlitePlannerInputReader(imported).read(), OrToolsPlanGenerator(), 42, "2026-10-19T00:00:00Z")
     assert a.plan.model_dump(mode="json") == b.plan.model_dump(mode="json")
     assert a.shopping_list.model_dump(mode="json") == b.shopping_list.model_dump(mode="json")
 
@@ -128,7 +129,10 @@ def test_empty_database_has_no_inputs(db: Path) -> None:
 
 def test_workflow_service_on_sqlite_inputs_and_repo(imported: Path) -> None:
     svc = PlanWorkflowService(
-        SqlitePlanRepository(imported), SqlitePlannerInputReader(imported), lambda: NOW
+        SqlitePlanRepository(imported),
+        SqlitePlannerInputReader(imported),
+        lambda: NOW,
+        OrToolsPlanGenerator(),
     )
     rev = svc.create_plan(date(2026, 10, 26), seed=42)
     assert rev.input_basis.startswith("sha256:")
@@ -349,6 +353,7 @@ def test_retry_replay_survives_restart(imported: Path) -> None:
             SqlitePlanRepository(imported),
             SqlitePlannerInputReader(imported),
             lambda: NOW,
+            OrToolsPlanGenerator(),
             timezone="America/Bogota",
         )
 

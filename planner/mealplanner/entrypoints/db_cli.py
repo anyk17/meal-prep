@@ -26,7 +26,14 @@ from ..adapters.sqlite.store import (
 )
 from ..adapters.yaml_inputs import YamlPlannerInputReader
 from ..domain.snapshot import normalize_snapshot
-from ..domain.weekly_plan import DuplicateWeek, PlanRevision, WeeklyPlan, input_basis
+from ..domain.weekly_plan import (
+    DuplicateWeek,
+    PlanRevision,
+    RuleViolationError,
+    WeeklyPlan,
+    input_basis,
+    require_weekly_rules,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = PROJECT_ROOT / "var" / "mealplanner.db"  # var/ is git-ignored
@@ -61,7 +68,8 @@ def import_fixture(
 ) -> str:
     """Import the JSON fixture as revision 1 of its week. Returns "imported" or "skipped".
 
-    A week that already has a plan is never touched. Requires imported inputs
+    A week that already has a plan is never touched. The fixture must satisfy the weekly
+    rules (RuleViolationError otherwise). Requires imported inputs
     (the pantry and input basis come from the database).
     """
     repo = SqlitePlanRepository(db_path)
@@ -75,6 +83,7 @@ def import_fixture(
         week_start,
         timezone_name,
     )
+    require_weekly_rules(snapshot, inputs)  # RuleViolationError: the fixture is not imported
     plan_id = snapshot.plan["plan_id"]
     revision = PlanRevision(
         plan_id=plan_id,
@@ -183,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in exc.conflicts:
             print(f"  conflict: {name}", file=sys.stderr)
         return 2
+    except RuleViolationError as exc:
+        print("error: fixture rejected: " + str(exc), file=sys.stderr)
+        for violation in exc.violations:
+            print(f"  {violation.rule}: {violation.message}", file=sys.stderr)
+        return 1
     except (DatabaseError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

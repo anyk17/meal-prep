@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -11,6 +12,7 @@ from typing import Any
 
 from .planner_inputs import PlannerInputs
 from .snapshot import JsonObject, PlanSnapshot, canonical_snapshot_id, validate_snapshot
+from .weekly_rules import RuleViolation, check_weekly_rules
 
 # ---------------------------------------------------------------- errors
 
@@ -42,6 +44,23 @@ class StaleRevision(WorkflowError):
 
 class GenerationFailed(WorkflowError):
     """The solver could not produce a valid plan; nothing was stored."""
+
+
+class RuleViolationError(WorkflowError):
+    """A candidate plan breaks weekly rules; nothing was stored."""
+
+    def __init__(self, violations: Sequence[RuleViolation]) -> None:
+        self.violations = tuple(violations)
+        summary = "; ".join(f"{v.rule}: {v.message}" for v in self.violations[:5])
+        more = f" (+{len(self.violations) - 5} more)" if len(self.violations) > 5 else ""
+        super().__init__(f"plan breaks weekly rules: {summary}{more}")
+
+
+def require_weekly_rules(snapshot: PlanSnapshot, inputs: PlannerInputs) -> None:
+    """Raise RuleViolationError unless the snapshot satisfies every weekly rule."""
+    violations = check_weekly_rules(snapshot, inputs)
+    if violations:
+        raise RuleViolationError(violations)
 
 
 class ProposalNotFound(WorkflowError):

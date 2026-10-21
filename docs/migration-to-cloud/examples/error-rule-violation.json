@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": "rule_violation",
+    "message": "The plan breaks weekly rules.",
+    "details": [
+      {
+        "field": "weekly_protein_count",
+        "message": "fish is used 4 times, expected exactly 3"
+      },
+      {
+        "field": "consecutive_same_protein",
+        "message": "chicken dinner on consecutive days mon and tue"
+      }
+    ]
+  }
+}

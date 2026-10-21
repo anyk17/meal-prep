@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from ..domain.catalog import ProteinType
 from ..domain.planner_inputs import PlannerInputs
-from ..solver.solve import MealPlanSolution
+from ..domain.solution import MealPlanSolution
 
 
 class IngredientItem(BaseModel):

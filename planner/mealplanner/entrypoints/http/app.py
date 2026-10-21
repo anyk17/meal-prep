@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from ...adapters.json_snapshot import JsonPlanReadRepository, SourceUnavailableError
 from ...application.plan_reads import PlanReadService
-from ...application.ports import PlanReadRepository
+from ...application.ports import PlanGenerator, PlanReadRepository
 from ...domain.snapshot import SourceInvalidError
 from .read_routes import register_read_routes
 from .write_routes import GenerationGate, register_write_routes
@@ -84,12 +84,12 @@ def _build_workflow_service(
     db_path: Path | str,
     timezone: str | None,
     clock: Callable[[], datetime] | None,
-    generator: Callable[..., Any] | None,
+    generator: PlanGenerator | None,
     solver_timeout_seconds: float | None,
     proposal_ttl: timedelta | None,
 ) -> Any:
     from ...adapters.sqlite.store import SqlitePlannerInputReader, SqlitePlanRepository
-    from ...application.generation import generate
+    from ...adapters.ortools import OrToolsPlanGenerator
     from ...application.plan_workflows import DEFAULT_PROPOSAL_TTL, PlanWorkflowService
 
     zone = timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota")
@@ -97,16 +97,12 @@ def _build_workflow_service(
     timeout = solver_timeout_seconds or _env_number(
         "MEALPLANNER_SOLVER_TIMEOUT_SECONDS", DEFAULT_SOLVER_TIMEOUT_SECONDS, float
     )
-    solve = generator or (
-        lambda inputs, seed, generated_at: generate(
-            inputs, seed, generated_at, max_time_seconds=timeout
-        )
-    )
+    plan_generator = generator or OrToolsPlanGenerator(max_time_seconds=timeout)
     return PlanWorkflowService(
         SqlitePlanRepository(db_path),
         SqlitePlannerInputReader(db_path),
         clock or (lambda: datetime.now(tz)),
-        generator=solve,
+        generator=plan_generator,
         timezone=zone,
         proposal_ttl=proposal_ttl or DEFAULT_PROPOSAL_TTL,
     )
@@ -122,7 +118,7 @@ def create_app(
     timezone: str | None = None,
     db_path: Path | str | None = None,
     clock: Callable[[], datetime] | None = None,
-    generator: Callable[..., Any] | None = None,
+    generator: PlanGenerator | None = None,
     solver_timeout_seconds: float | None = None,
     max_concurrent_generations: int | None = None,
     proposal_ttl: timedelta | None = None,

@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from mealplanner.adapters.memory import InMemoryPlanReadAdapter, InMemoryPlanRepository
-from mealplanner.application.generation import GeneratedPlan, generate
+from mealplanner.adapters.ortools import OrToolsPlanGenerator
+from mealplanner.domain.solution import MealPlanSolution
 from mealplanner.domain.weekly_plan import (
     DuplicateWeek,
     GenerationFailed,
@@ -38,12 +39,12 @@ CURRENT = date(2026, 10, 19)
 PAST = date(2026, 10, 12)
 NOW = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)  # Wednesday in Bogota
 
-_cache: dict[int, GeneratedPlan] = {}
+_cache: dict[int, MealPlanSolution] = {}
 
 
-def real(inputs: PlannerInputs, seed: int, generated_at: str | None) -> GeneratedPlan:
+def real(inputs: PlannerInputs, seed: int) -> MealPlanSolution:
     if seed not in _cache:
-        _cache[seed] = generate(inputs, seed, generated_at)
+        _cache[seed] = OrToolsPlanGenerator().generate(inputs, seed)
     return _cache[seed]
 
 
@@ -71,11 +72,11 @@ class Calls:
         self.fail = False
         self.pin: int | None = None
 
-    def __call__(self, inputs: PlannerInputs, seed: int, generated_at: str | None) -> GeneratedPlan:
+    def generate(self, inputs: PlannerInputs, seed: int) -> MealPlanSolution:
         self.count += 1
         if self.fail:
             raise RuntimeError("infeasible")
-        return real(inputs, self.pin if self.pin is not None else seed, generated_at)
+        return real(inputs, self.pin if self.pin is not None else seed)
 
 
 def make_repo(kind: str, tmp_path: Path):
@@ -362,8 +363,10 @@ def test_linked_pair_changes_atomically(env: Env) -> None:
 
 
 def test_linked_pair_split_is_rejected() -> None:
-    a = real(INPUTS, 1, None)
-    b = real(INPUTS, 2, None)
+    from mealplanner.application.generation import generate
+
+    a = generate(INPUTS, Calls(), 1, None)
+    b = generate(INPUTS, Calls(), 2, None)
     from mealplanner.domain.snapshot import normalize_snapshot
 
     def snap(g):
@@ -421,7 +424,7 @@ def test_snapshot_id_semantics(env: Env) -> None:
 def test_real_generation_service_on_repo_inputs(kind: str, tmp_path: Path) -> None:
     repo, adapter = make_repo(kind, tmp_path)
     clock = Clock()
-    svc = PlanWorkflowService(repo, Reader(), clock)  # default generator = generate()
+    svc = PlanWorkflowService(repo, Reader(), clock, OrToolsPlanGenerator())
     rev = svc.create_plan(FUTURE, seed=42)
     assert len(rev.snapshot.plan["slots"]) == 10
     p = svc.propose_regeneration(rev.plan_id, 1, seed=7)

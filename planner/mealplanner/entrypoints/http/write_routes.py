@@ -28,6 +28,7 @@ from ...domain.weekly_plan import (
     ProposalExpired,
     ProposalNotFound,
     RetryIdReused,
+    RuleViolationError,
     SlotChange,
     StaleRevision,
     WeekNotEditable,
@@ -53,6 +54,7 @@ ERROR_MAP: list[tuple[type[Exception], int, str]] = [
     (DuplicateWeek, 409, "duplicate_week"),
     (InvalidWeek, 400, "invalid_week"),
     (GenerationFailed, 422, "generation_failed"),
+    (RuleViolationError, 422, "rule_violation"),
     (PlanNotFound, 404, "plan_not_found"),
 ]
 
@@ -223,6 +225,8 @@ def register_write_routes(
                         {"field": "expected_revision", "message": str(exc.expected)},
                         {"field": "actual_revision", "message": str(exc.actual)},
                     ]
+                if isinstance(exc, RuleViolationError):
+                    details = [{"field": v.rule, "message": v.message} for v in exc.violations]
                 return error(status, code, _message(code, exc), details)
         raise exc
 
@@ -235,6 +239,7 @@ def register_write_routes(
             "retry_id_reused": "This Idempotency-Key was already used for a different request.",
             "nothing_to_undo": "The first revision has no earlier revision to restore.",
             "linked_pair_split": "A linked lunch and dinner must change together.",
+            "rule_violation": "The plan breaks weekly rules.",
             "plan_not_found": "No plan exists for the requested plan_id.",
         }
         return fixed.get(code, str(exc) or code)

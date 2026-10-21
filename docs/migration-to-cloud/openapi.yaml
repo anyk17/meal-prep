@@ -83,7 +83,10 @@ paths:
         Solves and stores a new plan for a current or future Monday-through-Sunday week
         (one plan per week); seed defaults to 42. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden. Solver runs are bounded: at most
         MEALPLANNER_MAX_CONCURRENT_GENERATIONS run at once (others get 503 generation_busy,
-        never queued) and each solve has a time limit (422 generation_failed).
+        never queued) and each solve has a time limit (422 generation_failed). Every candidate is checked
+        against the weekly rules (protein counts, adjacency, carbs, recipe limits, lunch/dinner
+        linkage); a violating result is never stored (422 rule_violation, details lists
+        field = rule code and message).
       requestBody:
         required: true
         description: Week to create and optional solver seed.
@@ -136,7 +139,7 @@ paths:
                   summary: Week has already started
                   externalValue: examples/error-week-not-editable.json
         '422':
-          description: The solver found no valid plan or hit its time limit; nothing was stored.
+          description: The solver found no valid plan or hit its time limit (generation_failed), or the result broke weekly rules (rule_violation); nothing was stored.
           headers:
             Cache-Control:
               description: Responses are not stored by caches.
@@ -151,6 +154,9 @@ paths:
                 generationFailed:
                   summary: Solver failed or timed out; nothing stored
                   externalValue: examples/error-generation-failed.json
+                ruleViolation:
+                  summary: A candidate broke weekly rules; nothing stored
+                  externalValue: examples/error-rule-violation.json
         '503':
           description: Generation is busy (Retry-After given) or the database is unavailable.
           headers:
@@ -353,7 +359,7 @@ paths:
                   summary: Week has already started
                   externalValue: examples/error-week-not-editable.json
         '422':
-          description: The solver found no valid plan or hit its time limit.
+          description: The solver found no valid plan or hit its time limit (generation_failed), or the result broke weekly rules (rule_violation); nothing was stored.
           headers:
             Cache-Control:
               description: Responses are not stored by caches.
@@ -368,6 +374,9 @@ paths:
                 generationFailed:
                   summary: Solver failed or timed out; nothing stored
                   externalValue: examples/error-generation-failed.json
+                ruleViolation:
+                  summary: A candidate broke weekly rules; nothing stored
+                  externalValue: examples/error-rule-violation.json
         '503':
           description: Generation is busy (Retry-After given) or the database is unavailable.
           headers:
@@ -595,7 +604,7 @@ paths:
                   summary: Proposal is past expires_at
                   externalValue: examples/error-proposal-expired.json
         '422':
-          description: The Idempotency-Key was used for a different request.
+          description: The Idempotency-Key was used for a different request (retry_id_reused), or the content to commit breaks weekly rules (rule_violation); nothing was stored.
           headers:
             Cache-Control:
               description: Responses are not stored by caches.
@@ -610,6 +619,9 @@ paths:
                 reusedKey:
                   summary: Same key, different request
                   externalValue: examples/error-retry-id-reused.json
+                ruleViolation:
+                  summary: A candidate broke weekly rules; nothing stored
+                  externalValue: examples/error-rule-violation.json
 
   /api/v1/plans/{plan_id}/undo:
     post:
@@ -673,7 +685,7 @@ paths:
                   summary: Plan is at revision 1
                   externalValue: examples/error-nothing-to-undo.json
         '422':
-          description: The Idempotency-Key was used for a different request.
+          description: The Idempotency-Key was used for a different request (retry_id_reused), or the content to commit breaks weekly rules (rule_violation); nothing was stored.
           headers:
             Cache-Control:
               description: Responses are not stored by caches.
@@ -688,6 +700,9 @@ paths:
                 reusedKey:
                   summary: Same key, different request
                   externalValue: examples/error-retry-id-reused.json
+                ruleViolation:
+                  summary: A candidate broke weekly rules; nothing stored
+                  externalValue: examples/error-rule-violation.json
 
   /api/v1/plans/{plan_id}/revisions:
     get:
@@ -1316,7 +1331,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, generation_busy]
+              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy]
             message:
               type: string
             details:

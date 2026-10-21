@@ -12,7 +12,8 @@ from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
 from mealplanner.entrypoints.http.app import create_app
 from mealplanner.entrypoints.db_cli import import_inputs
-from mealplanner.application.generation import GeneratedPlan, generate
+from mealplanner.adapters.ortools import OrToolsPlanGenerator
+from mealplanner.domain.solution import MealPlanSolution
 from mealplanner.domain.planner_inputs import PlannerInputs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,13 +24,22 @@ FUTURE_ID = "plan_2026_10_26"
 KEY = {"Idempotency-Key": "key-1"}
 LAN = {"REMOTE_ADDR": "192.168.1.20"}
 
-_cache: dict[int, GeneratedPlan] = {}
+_cache: dict[int, MealPlanSolution] = {}
 
 
-def stub_solver(inputs: PlannerInputs, seed: int, generated_at: str | None) -> GeneratedPlan:
-    if seed not in _cache:
-        _cache[seed] = generate(inputs, seed, generated_at)
-    return _cache[seed]
+class CachedGenerator:
+    """PlanGenerator that memoises the real OR-Tools solution per seed (speed only)."""
+
+    def __init__(self, max_time_seconds: float | None = None) -> None:
+        self.max_time_seconds = max_time_seconds
+
+    def generate(self, inputs: PlannerInputs, seed: int) -> MealPlanSolution:
+        if seed not in _cache:
+            _cache[seed] = OrToolsPlanGenerator().generate(inputs, seed)
+        return _cache[seed]
+
+
+stub_solver = CachedGenerator()
 
 
 def check_schema(name: str, instance) -> None:
@@ -324,10 +334,11 @@ def test_generation_busy_when_gate_held(app, client) -> None:
 
 
 def test_generation_failure_maps_and_releases_gate(db_path, clock) -> None:
-    def broken(inputs, seed, generated_at):
-        raise RuntimeError("infeasible")
+    class Broken:
+        def generate(self, inputs, seed):
+            raise RuntimeError("infeasible")
 
-    client = create_app(db_path=db_path, clock=clock, generator=broken).test_client()
+    client = create_app(db_path=db_path, clock=clock, generator=Broken()).test_client()
     for _ in range(2):  # a second attempt proves the gate was released
         fail(client.post("/api/v1/plans", json={"week_start": FUTURE}), 422, "generation_failed")
 
@@ -335,15 +346,36 @@ def test_generation_failure_maps_and_releases_gate(db_path, clock) -> None:
 def test_solver_time_limit_is_wired(db_path, clock, monkeypatch) -> None:
     seen = {}
 
-    def spy(inputs, seed, generated_at, max_time_seconds=None):
-        seen["limit"] = max_time_seconds
-        return stub_solver(inputs, seed, generated_at)
+    class Spy(CachedGenerator):
+        def __init__(self, max_time_seconds=None):
+            seen["limit"] = max_time_seconds
 
-    monkeypatch.setattr("mealplanner.application.generation.generate", spy)
+    monkeypatch.setattr("mealplanner.adapters.ortools.OrToolsPlanGenerator", Spy)
     monkeypatch.setenv("MEALPLANNER_SOLVER_TIMEOUT_SECONDS", "12")
     client = create_app(db_path=db_path, clock=clock).test_client()
     make_plan(client)
     assert seen["limit"] == 12.0
+
+
+def test_rule_violating_result_maps_to_rule_violation_and_stores_nothing(db_path, clock) -> None:
+    class Violating:
+        """Real solution with two lunches swapped: structurally valid, but breaks adjacency rules."""
+
+        def generate(self, inputs, seed):
+            solution = CachedGenerator().generate(inputs, 42)
+            assignments = dict(solution.assignments)
+            assignments["mon_lunch"], assignments["thu_lunch"] = (
+                assignments["thu_lunch"],
+                assignments["mon_lunch"],
+            )
+            return MealPlanSolution(assignments=assignments)
+
+    client = create_app(db_path=db_path, clock=clock, generator=Violating()).test_client()
+    response = client.post("/api/v1/plans", json={"week_start": FUTURE})
+    error = fail(response, 422, "rule_violation")
+    assert error["details"], error
+    assert all(set(d) == {"field", "message"} for d in error["details"])
+    assert client.get(f"/api/v1/plans/{FUTURE_ID}").status_code == 404
 
 
 # ---- end to end with the real solver and wall clock

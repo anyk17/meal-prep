@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..adapters.files import render_plan_output, write_shopping_output
 from ..adapters.yaml_inputs import YamlPlannerInputReader, load_data, validate_recipe_file
+from ..adapters.ortools import OrToolsPlanGenerator
 from ..application.generation import generate as generate_outputs
 
 
@@ -35,7 +36,7 @@ def generate_plan(data_dir: Path, output_dir: Path, seed: int) -> int:
         
         # 2. Solve and construct DTOs in memory
         print(f"Generating plan with seed {seed}...")
-        generated = generate_outputs(inputs, seed)
+        generated = generate_outputs(inputs, OrToolsPlanGenerator(), seed)
         print("✓ Solution found!")
         
         print("Generating shopping list...")

@@ -9,7 +9,8 @@ from mealplanner.application.generation import generate
 from mealplanner.domain.planner_inputs import PlannerInputs
 from mealplanner.application.plan_output import build_plan_output
 from mealplanner.application.shopping import generate_shopping_list
-from mealplanner.solver.solve import MealPlanSolution
+from mealplanner.adapters.ortools import OrToolsPlanGenerator
+from mealplanner.domain.solution import MealPlanSolution
 from mealplanner.domain.variants import RecipeVariant
 from mealplanner.adapters.yaml_inputs import YamlPlannerInputReader
 
@@ -149,7 +150,7 @@ class GenerationServicesTest(unittest.TestCase):
             patch.object(Path, "open", side_effect=AssertionError("unexpected file output")),
             patch("builtins.open", side_effect=AssertionError("unexpected file output")),
         ):
-            result = generate(self.inputs, seed=42)
+            result = generate(self.inputs, OrToolsPlanGenerator(), seed=42)
             self.assertTrue(result.plan.slots)
             self.assertTrue(result.shopping_list.sections)
 
