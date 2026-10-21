@@ -22,7 +22,7 @@ const PROTEIN_ICONS = {
     default: Utensils
 };
 
-export function MealCard({ slot, onClick }) {
+export function MealCard({ slot, onClick, highlighted = false }) {
     const { recipeName, protein, carb, meal, proteinQty, proteinUnit, carbQty, carbUnit } = slot;
 
     const colorClass = PROTEIN_COLORS[protein] || PROTEIN_COLORS.default;
@@ -32,7 +32,8 @@ export function MealCard({ slot, onClick }) {
         <div
             className={cn(
                 "p-3 rounded-lg border shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col gap-2 relative overflow-hidden",
-                colorClass
+                colorClass,
+                highlighted && "ring-2 ring-indigo-500 ring-offset-2 dark:ring-offset-slate-900"
             )}
             onClick={onClick}
         >

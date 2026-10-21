@@ -1,44 +1,24 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { MealCard } from './components/MealCard';
 import { ShoppingList } from './components/ShoppingList';
 import { RecipeModal } from './components/RecipeModal';
-import { Utensils, Calendar, Moon, Sun } from 'lucide-react';
+import { WeekGrid } from './components/WeekGrid';
+import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createApiReader } from './readers/api';
 import { createStaticReader } from './readers/static';
-import { validatePair } from './readers/shared.js';
+import { validatePair, addDays } from './readers/shared.js';
+import { mondayOf, todayIn, formatWeekRange } from './dates.js';
 
 const createReader = () => import.meta.env.VITE_READER_MODE === 'static'
   ? createStaticReader('publication/index.json')
   : createApiReader(import.meta.env.VITE_API_BASE_PATH || '/api/v1');
 let reader = createReader();
-const INITIAL_FROM = import.meta.env.VITE_DEFAULT_FROM || '2026-10-19';
-const INITIAL_TO = import.meta.env.VITE_DEFAULT_TO || '2026-10-25';
+const INITIAL_WEEK = mondayOf(import.meta.env.VITE_DEFAULT_FROM || '2026-10-19');
 
-// Map shorthand days to full names
-const DAYS = {
-  mon: 'Monday',
-  tue: 'Tuesday',
-  wed: 'Wednesday',
-  thu: 'Thursday',
-  fri: 'Friday',
-  sat: 'Saturday',
-  sun: 'Sunday'
-};
-
-const MEALS = ['lunch', 'dinner'];
-const WEEKEND_DAYS = new Set(['sat', 'sun']);
-const WEEKEND_COPY = {
-  sat: {
-    badge: 'Saturday',
-    title: 'Eat outside',
-    description: 'No cooking planned. Leave room for a lunch out, a casual dinner, or whatever sounds good that day.'
-  },
-  sun: {
-    badge: 'Sunday',
-    title: 'Kitchen off',
-    description: 'Recovery day. Keep it flexible with leftovers, takeout, or a spontaneous plan before the next prep cycle.'
-  }
-};
+// Editing is home-only. In the static (Pages) build these constants fold to null at build time, so
+// the write client and editing UI are never bundled and cannot be enabled at runtime.
+const loadEditor = import.meta.env.VITE_READER_MODE === 'static' ? null : () => import('./editing/planEditor.js');
+const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx'));
 
 function formatLocalDateTime(value) {
   const date = new Date(value);
@@ -66,6 +46,10 @@ function App() {
   const [error, setError] = useState(null);
   const [sourceContext, setSourceContext] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [weekStart, setWeekStart] = useState(INITIAL_WEEK);
+  const [loaded, setLoaded] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [review, setReview] = useState(null);
   const requestGeneration = useRef(0);
   const hasPlan = useRef(false);
   const garbageCollector = getGarbageCollectorLabel();
@@ -94,11 +78,11 @@ function App() {
     try {
       const candidateReader = refresh && reader.mode === 'static' ? createReader() : reader;
       if (refresh && candidateReader.mode === 'static') await candidateReader.refresh();
-      const range = { from: INITIAL_FROM, to: INITIAL_TO };
+      const range = { from: weekStart, to: addDays(weekStart, 6) };
       const result = await candidateReader.listPlans(range);
-      let selected = result.items.find(item => item.week_start === INITIAL_FROM) || result.items[0];
+      let selected = result.items.find(item => item.week_start === weekStart);
       if (generation !== requestGeneration.current) return;
-      if (!selected) { reader = candidateReader; hasPlan.current=false; setPlan(null); setShoppingList(null); setSourceContext(candidateReader.context); setSelectedSlot(null); setError(null); return; }
+      if (!selected) { reader = candidateReader; hasPlan.current=false; setPlan(null); setShoppingList(null); setSourceContext(candidateReader.context); setSelectedSlot(null); setError(null); setLoaded(true); return; }
       let nextPlan, nextShop;
       for (let attempt = 0; attempt < (candidateReader.mode === 'api' ? 2 : 1); attempt += 1) {
         nextPlan = await candidateReader.getPlan(selected.plan_id);
@@ -106,7 +90,7 @@ function App() {
         catch (err) {
           if (err.code !== 'snapshot_changed' || attempt > 0 || candidateReader.mode !== 'api') throw err;
           const refreshed = await candidateReader.listPlans(range);
-          selected = refreshed.items.find(item => item.plan_id === selected.plan_id) || refreshed.items.find(item => item.week_start === INITIAL_FROM) || refreshed.items[0];
+          selected = refreshed.items.find(item => item.plan_id === selected.plan_id) || refreshed.items.find(item => item.week_start === weekStart);
           if (!selected) throw err;
         }
       }
@@ -119,15 +103,32 @@ function App() {
       setSourceContext(candidateReader.context);
       setSelectedSlot(null);
       setError(null);
+      setLoaded(true);
     } catch (err) {
       if (generation !== requestGeneration.current) return;
       setError(err?.message || 'Could not load the meal plan.');
     } finally { if (generation === requestGeneration.current) { setLoading(false); setRefreshing(false); } }
-  }, []);
+  }, [weekStart]);
 
   useEffect(() => { void loadData(); return () => { requestGeneration.current += 1; }; }, [loadData]);
 
-  if (loading && !plan) {
+  // Ask the server whether this client may edit. Hiding controls is not authorization; the server enforces it.
+  const refreshCapabilities = useCallback(async () => {
+    if (!loadEditor) return;
+    try { const { createPlanEditor } = await loadEditor(); setCanEdit((await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities()).canEditPlans); }
+    catch { setCanEdit(false); }
+  }, []);
+  useEffect(() => { void refreshCapabilities(); }, [refreshCapabilities]);
+
+  const goToWeek = target => {
+    if (target === weekStart) return;
+    hasPlan.current = false;
+    setReview(null); setPlan(null); setShoppingList(null); setError(null); setSelectedSlot(null);
+    setWeekStart(target);
+  };
+  const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
+
+  if (!loaded && loading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="animate-pulse flex flex-col items-center gap-4">
@@ -138,7 +139,7 @@ function App() {
     );
   }
 
-  if (error && !plan) {
+  if (error && !loaded) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-lg border border-red-100 dark:border-red-900/30 max-w-md text-center">
@@ -156,16 +157,13 @@ function App() {
     );
   }
 
-  if (!plan) return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-8 text-center text-slate-700 dark:text-slate-200">{error ? `Unable to load plan: ${error}` : `${reader.mode === 'static' ? 'No published plan' : 'No plan'} for ${INITIAL_FROM}–${INITIAL_TO}.`}<button className="ml-4 underline" onClick={() => loadData(true)}>Refresh</button></div>;
-
-  const actualRange = `${plan.week_start} – ${plan.week_end}`;
+  const actualRange = formatWeekRange(weekStart);
   const publicationDate = sourceContext?.exported_at ? `Snapshot as of ${formatLocalDateTime(sourceContext.exported_at)}` : 'Home plan';
-  // Organize slots by day and meal
-  const getSlot = (day, meal) => {
-    return plan?.slots.find(s => s.day === day && s.meal === meal);
-  };
-
-  const isWeekend = (day) => WEEKEND_DAYS.has(day);
+  const shown = review?.plan ?? plan;
+  const shownShopping = review?.shopping_list ?? shoppingList;
+  const highlightIds = review ? new Set(review.changes.filter(change => change.kind !== 'removed').map(change => change.assignment_id)) : null;
+  const thisWeek = mondayOf(todayIn(plan?.timezone));
+  const emptyCopy = reader.mode === 'static' ? 'No published plan for this week.' : 'No plan for this week yet.';
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans pb-20 transition-colors duration-200">
@@ -183,15 +181,11 @@ function App() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-xs text-slate-400 font-mono hidden sm:block">
-              {publicationDate}<br />Seed: {plan.seed}
-              <br />
-              <span className="text-[10px] opacity-75">
-                {formatLocalDateTime(plan.generated_at)}
-              </span>
+              {publicationDate}{plan && <><br />Seed: {plan.seed}<br /><span className="text-[10px] opacity-75">r{plan.revision} · {formatLocalDateTime(plan.generated_at)}</span></>}
               <br />
               <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
-            <button onClick={() => loadData(true)} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            <button onClick={() => reload(true)} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
             <button
               onClick={toggleTheme}
               className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -203,67 +197,39 @@ function App() {
         </div>
       </header>
 
-      {error && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} The displayed plan and groceries are still from the same snapshot.</div>}
+      {error && plan && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} The displayed plan and groceries are still from the same snapshot.</div>}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <nav aria-label="Week navigation" className="flex flex-wrap items-center gap-2">
+          <button onClick={() => goToWeek(addDays(weekStart, -7))} disabled={!!review} aria-label="Previous week" className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-50"><ChevronLeft size={16} /></button>
+          <button onClick={() => goToWeek(thisWeek)} disabled={!!review || weekStart === thisWeek} className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm disabled:opacity-50">This week</button>
+          <button onClick={() => goToWeek(addDays(weekStart, 7))} disabled={!!review} aria-label="Next week" className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-50"><ChevronRight size={16} /></button>
+          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 ml-2">{actualRange}</span>
+        </nav>
+
+        {canEdit && EditingPanel && loaded && (
+          <Suspense fallback={null}>
+            <EditingPanel key={weekStart} weekStart={weekStart} plan={plan} review={review} onReview={setReview} onReload={reload} />
+          </Suspense>
+        )}
+
+        {!shown ? (
+          <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center text-slate-600 dark:text-slate-300">
+            {loading ? 'Loading week…' : error ? (
+              <>Unable to load this week: {error} <button className="ml-2 underline" onClick={() => loadData(true)}>Retry</button></>
+            ) : emptyCopy}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
 
           {/* Meal Grid (Takes up 3 columns on large screens) */}
           <div className="lg:col-span-3 space-y-8">
             <div className="flex items-center gap-2 mb-6">
               <Calendar className="text-indigo-600 dark:text-indigo-400" />
-              <h2 className="text-xl font-bold text-slate-800 dark:text-white">Weekly Plan</h2>
+              <h2 className="text-xl font-bold text-slate-800 dark:text-white">{review ? 'Proposed Plan' : 'Weekly Plan'}</h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {Object.keys(DAYS).map(day => (
-                <div key={day} className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-full transition-colors duration-200">
-                  <div className="bg-slate-50 dark:bg-slate-800/50 px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <span className="font-bold text-slate-700 dark:text-slate-200">{DAYS[day]}</span>
-                    <span className="text-xs text-slate-400 uppercase font-mono">{day}</span>
-                  </div>
-
-                  <div className="p-4 space-y-4 flex-1 flex flex-col justify-center">
-                    {isWeekend(day) ? (
-                      <div className="flex-1 rounded-2xl border border-dashed border-amber-300/80 dark:border-amber-700/60 bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-rose-950/30 p-5 flex flex-col justify-between min-h-[220px]">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-700 dark:text-amber-300">
-                            {WEEKEND_COPY[day].badge}
-                          </span>
-                          <div className="rounded-full bg-white/80 dark:bg-slate-900/60 p-2 text-amber-500 dark:text-amber-300 shadow-sm">
-                            <Sun size={18} />
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                            {WEEKEND_COPY[day].title}
-                          </h3>
-                          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-                            {WEEKEND_COPY[day].description}
-                          </p>
-                        </div>
-
-                      </div>
-                    ) : (
-                      MEALS.map(meal => {
-                        const dto = getSlot(day, meal);
-                        if (!dto) return null;
-                        const slot = { ...dto, recipeName: dto.recipe_name, proteinQty: dto.protein_quantity.value, proteinUnit: dto.protein_quantity.unit, carb: dto.carb ?? 'none', carbQty: dto.carb_quantity?.value, carbUnit: dto.carb_quantity?.unit, ingredients: dto.ingredients.map(i => ({ ...i, qty: i.quantity })) };
-
-                        return (
-                          <MealCard
-                            key={`${day}-${meal}`}
-                            slot={slot}
-                            onClick={() => setSelectedSlot(slot)}
-                          />
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <WeekGrid plan={shown} onSelect={setSelectedSlot} highlightIds={highlightIds} />
 
             {/* Stats Summary */}
             <div className="mt-12 bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 transition-colors duration-200">
@@ -272,7 +238,7 @@ function App() {
                 <div>
                   <h4 className="text-xs uppercase text-slate-500 dark:text-slate-400 mb-2">Protein</h4>
                   <ul className="space-y-1 text-sm">
-                    {Object.entries(plan.derived.protein_counts).map(([key, count]) => (
+                    {Object.entries(shown.derived.protein_counts).map(([key, count]) => (
                       <li key={key} className="flex justify-between text-slate-700 dark:text-slate-300">
                         <span className="capitalize">{key}</span>
                         <span className="font-mono font-bold text-slate-900 dark:text-white">{count}</span>
@@ -283,7 +249,7 @@ function App() {
                 <div>
                   <h4 className="text-xs uppercase text-slate-500 dark:text-slate-400 mb-2">Carbs</h4>
                   <ul className="space-y-1 text-sm">
-                    {Object.entries(plan.derived.carb_counts).map(([key, count]) => (
+                    {Object.entries(shown.derived.carb_counts).map(([key, count]) => (
                       <li key={key} className="flex justify-between text-slate-700 dark:text-slate-300">
                         <span className="capitalize">{key}</span>
                         <span className="font-mono font-bold text-slate-900 dark:text-white">{count}</span>
@@ -297,9 +263,10 @@ function App() {
 
           {/* Shopping List Sidebar */}
           <div className="lg:col-span-1 h-fit sticky top-24">
-            <ShoppingList items={shoppingList} plan={plan} mode={reader.mode} />
+            <ShoppingList items={shownShopping} plan={shown} mode={review ? `proposal-${review.proposal_id}` : reader.mode} />
           </div>
         </div>
+        )}
       </main>
 
       {/* Recipe Modal */}

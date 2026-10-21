@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phase 1 and Phase 2 are complete on `feature/cloud-migration-phase-2`. Backend tests, frontend reader tests/lint, both frontend builds, and contract validators pass, and a live browser walkthrough (2026-10-21) confirmed API mode, static mode, the empty bundle, checkmark scoping, refresh pinning, and the API-down error states. Phase 3 (saved weeks, SQLite, home editing) is next; exporter and NAS deployment remain later phases. This document is the current roadmap; later-phase paths and behaviors describe planned work.
+**Status:** Phases 1–3 are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users can create, preview/accept/discard regeneration, undo, and fill a month (a batch of independent weekly plans) in API mode, while static mode stays read-only. Weekly rules are domain specifications checked on every saved plan; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Backend, frontend, contract checks, and a browser walkthrough (2026-10-21) pass. Phase 4 (month view, shared grocery checkmarks) is next.
 
 ## Starting point and first milestone
 
@@ -197,7 +197,7 @@ In phase 4, home API mode moves household checkmarks to shared database state sc
 
 **Exit:** the same frontend views work against both API mode and a prepared static bundle. API/JSON examples and static DTOs render the same plan and grocery information. No automatic fallback occurs. CLI results, quantities, statistics, and solver behavior match before refactoring for representative inputs and the same solver configuration. Read services can be exercised without Flask context; solver services need no YAML/filesystem access. Contract, mode, and integration checks pass.
 
-### Phase 3 — Saved weeks and home editing
+### Phase 3 — Saved weeks and home editing (complete)
 
 **3a: domain and application workflows.** Implement plan creation, regeneration proposal, discard, acceptance, no-op, stale-base rejection, idempotent retries, and started-week policy independently of Flask/SQLite. Keep linked changes atomic and preserve complete saved assignment data. Test lifecycle transitions through application services.
 
