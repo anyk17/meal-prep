@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "forbidden",
+    "message": "Plan changes are allowed from this machine only.",
+    "details": []
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The request is invalid.",
+    "details": [
+      {
+        "field": "color",
+        "message": "unknown field 'color'"
+      }
+    ]
+  }
+}

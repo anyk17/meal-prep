@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "nothing_to_undo",
+    "message": "The first revision has no earlier revision to restore.",
+    "details": []
+  }
+}

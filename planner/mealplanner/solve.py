@@ -301,8 +301,10 @@ def add_extend_to_dinner_constraints(model: PlannerModel, rules: Rules) -> None:
                 model.model.Add(sum(lunch_vars) == sum(dinner_vars))
 
 
-def solve_plan(inputs: PlannerInputs, seed: int = 42) -> MealPlanSolution:
-    """Generate a meal plan."""
+def solve_plan(
+    inputs: PlannerInputs, seed: int = 42, max_time_seconds: float | None = None
+) -> MealPlanSolution:
+    """Generate a meal plan. max_time_seconds bounds solver runtime (None = unbounded)."""
     
     # 1. Expand variants
     variants = expand_variants(dict(inputs.recipes), dict(inputs.ingredients))
@@ -325,6 +327,8 @@ def solve_plan(inputs: PlannerInputs, seed: int = 42) -> MealPlanSolution:
     solver = cp_model.CpSolver()
     solver.parameters.random_seed = seed
     solver.parameters.num_workers = 1  # single-thread for deterministic results
+    if max_time_seconds is not None:
+        solver.parameters.max_time_in_seconds = float(max_time_seconds)
     
     status = solver.Solve(planner_model.model)
     

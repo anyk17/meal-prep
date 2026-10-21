@@ -18,10 +18,13 @@ class GeneratedPlan:
 
 
 def generate(
-    inputs: PlannerInputs, seed: int = 42, generated_at: str | None = None
+    inputs: PlannerInputs,
+    seed: int = 42,
+    generated_at: str | None = None,
+    max_time_seconds: float | None = None,
 ) -> GeneratedPlan:
     """Solve and construct all output DTOs without writing files."""
-    solution = solve_plan(inputs, seed)
+    solution = solve_plan(inputs, seed, max_time_seconds)
     shopping_list = generate_shopping_list(solution, inputs)
     plan = build_plan_output(solution, inputs, seed, generated_at=generated_at)
     return GeneratedPlan(solution=solution, plan=plan, shopping_list=shopping_list)

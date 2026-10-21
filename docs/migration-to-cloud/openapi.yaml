@@ -1,11 +1,14 @@
 openapi: 3.1.0
 info:
-  title: Meal Prep Read API
+  title: Meal Prep API
   version: 0.1.0
   description: |-
-    Read-only, versioned API for dated weekly meal plans and their current shopping
-    snapshots. This initial development API is intended to bind to loopback. It has
-    no authentication scheme and is not ready for remote deployment. Household-only
+    Versioned API for dated weekly meal plans and their current shopping snapshots.
+    Reads are always available. Plan changes (create, propose, accept, discard, undo)
+    and revision history need a SQLite-backed server and a loopback client; the server
+    rejects them otherwise (403 forbidden or read_only). Static publication stays
+    read-only. This development API is intended to bind to loopback. It has no
+    authentication scheme and is not ready for remote deployment. Household-only
     access protection is required before any remote exposure.
 servers:
   - url: http://127.0.0.1:5000
@@ -13,7 +16,11 @@ servers:
 security: []
 tags:
   - name: Plans
-    description: Current dated weekly plans and their grocery snapshots.
+    description: Dated weekly plans, their grocery snapshots, and revision history.
+  - name: Proposals
+    description: Preview, accept, discard, and undo plan changes.
+  - name: Capabilities
+    description: What the calling client may do.
 paths:
   /api/v1/plans:
     get:
@@ -68,6 +75,102 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '503':
           $ref: '#/components/responses/SourceFailure'
+    post:
+      tags: [Plans]
+      operationId: createPlan
+      summary: Create revision 1 of the plan for a week
+      description: |-
+        Solves and stores a new plan for a current or future Monday-through-Sunday week
+        (one plan per week); seed defaults to 42. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden. Solver runs are bounded: at most
+        MEALPLANNER_MAX_CONCURRENT_GENERATIONS run at once (others get 503 generation_busy,
+        never queued) and each solve has a time limit (422 generation_failed).
+      requestBody:
+        required: true
+        description: Week to create and optional solver seed.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlanRequest'
+      responses:
+        '201':
+          description: The new plan at revision 1.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Location:
+              description: Canonical URL of the created resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+              examples:
+                created:
+                  summary: Newly created plan
+                  externalValue: examples/plan.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '409':
+          description: The week already has a plan, or has already ended.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                duplicateWeek:
+                  summary: Week already has a plan
+                  externalValue: examples/error-duplicate-week.json
+                notEditable:
+                  summary: Week has already started
+                  externalValue: examples/error-week-not-editable.json
+        '422':
+          description: The solver found no valid plan or hit its time limit; nothing was stored.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationFailed:
+                  summary: Solver failed or timed out; nothing stored
+                  externalValue: examples/error-generation-failed.json
+        '503':
+          description: Generation is busy (Retry-After given) or the database is unavailable.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationBusy:
+                  summary: Solver concurrency bound reached
+                  externalValue: examples/error-generation-busy.json
   /api/v1/plans/{plan_id}:
     get:
       tags: [Plans]
@@ -183,6 +286,468 @@ paths:
                   externalValue: examples/error-snapshot-changed.json
         '503':
           $ref: '#/components/responses/SourceFailure'
+  /api/v1/plans/{plan_id}/proposals:
+    post:
+      tags: [Proposals]
+      operationId: proposeRegeneration
+      summary: Preview a regenerated plan without changing the current revision
+      description: |-
+        Runs the solver and stores a short-lived proposal (expires_at, default 30 minutes).
+        The current revision is not changed. changes lists per-slot differences;
+        identical is true when nothing would change. plan and shopping_list are the full
+        candidate content that accept would commit as revision base_revision + 1. Only
+        future weeks may be regenerated. seed defaults to the current seed + 1. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      requestBody:
+        required: true
+        description: The revision the client is looking at, and an optional seed.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeRequest'
+      responses:
+        '201':
+          description: The stored proposal.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Location:
+              description: Canonical URL of the created resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+              examples:
+                proposal:
+                  summary: Proposal with one changed slot
+                  externalValue: examples/proposal.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+        '409':
+          description: The expected revision is stale or the week is not editable.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                staleRevision:
+                  summary: expected_revision is behind the current revision
+                  externalValue: examples/error-stale-revision.json
+                notEditable:
+                  summary: Week has already started
+                  externalValue: examples/error-week-not-editable.json
+        '422':
+          description: The solver found no valid plan or hit its time limit.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationFailed:
+                  summary: Solver failed or timed out; nothing stored
+                  externalValue: examples/error-generation-failed.json
+        '503':
+          description: Generation is busy (Retry-After given) or the database is unavailable.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationBusy:
+                  summary: Solver concurrency bound reached
+                  externalValue: examples/error-generation-busy.json
+
+  /api/v1/plans/{plan_id}/proposals/{proposal_id}:
+    get:
+      tags: [Proposals]
+      operationId: getProposal
+      summary: Read a stored proposal
+      description: Returns the proposal while it is unexpired. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: The proposal.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+              examples:
+                proposal:
+                  summary: Proposal with one changed slot
+                  externalValue: examples/proposal.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          description: Unknown plan or proposal.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownProposal:
+                  summary: Proposal discarded, accepted, or never existed
+                  externalValue: examples/error-proposal-not-found.json
+        '410':
+          description: The proposal expired.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                expiredProposal:
+                  summary: Proposal is past expires_at
+                  externalValue: examples/error-proposal-expired.json
+
+    delete:
+      tags: [Proposals]
+      operationId: discardProposal
+      summary: Discard a proposal
+      description: Drops the proposal; no revision is created. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '204':
+          description: Proposal discarded.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          description: Unknown plan or proposal.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownProposal:
+                  summary: Proposal discarded, accepted, or never existed
+                  externalValue: examples/error-proposal-not-found.json
+
+  /api/v1/plans/{plan_id}/proposals/{proposal_id}/accept:
+    post:
+      tags: [Proposals]
+      operationId: acceptProposal
+      summary: Commit a proposal as exactly one new revision
+      description: |-
+        Never re-solves. Commits the previewed content as revision N + 1 when the plan is
+        still at expected_revision, the proposal is unexpired and based on that revision,
+        and recipes, rules, and pantry are unchanged since the preview. An identical
+        proposal returns changed: false and creates no revision. Retrying with the same
+        Idempotency-Key and request replays the original result with replayed: true.
+        Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: The revision the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpectedRevisionRequest'
+      responses:
+        '200':
+          description: The resulting revision.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MutationResult'
+              examples:
+                accepted:
+                  summary: Accepted as revision 2
+                  externalValue: examples/mutation-result.json
+                replayed:
+                  summary: Same Idempotency-Key retried
+                  externalValue: examples/mutation-result-replayed.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          description: Unknown plan or proposal.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownProposal:
+                  summary: Proposal discarded, accepted, or never existed
+                  externalValue: examples/error-proposal-not-found.json
+        '409':
+          description: Stale revision, changed inputs, split linked pair, or week not editable.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                staleRevision:
+                  summary: expected_revision is behind the current revision
+                  externalValue: examples/error-stale-revision.json
+                basisChanged:
+                  summary: Inputs changed after the preview
+                  externalValue: examples/error-input-basis-changed.json
+                pairSplit:
+                  summary: Only half of a linked pair changed
+                  externalValue: examples/error-linked-pair-split.json
+                notEditable:
+                  summary: Week has already started
+                  externalValue: examples/error-week-not-editable.json
+        '410':
+          description: The proposal expired.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                expiredProposal:
+                  summary: Proposal is past expires_at
+                  externalValue: examples/error-proposal-expired.json
+        '422':
+          description: The Idempotency-Key was used for a different request.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                reusedKey:
+                  summary: Same key, different request
+                  externalValue: examples/error-retry-id-reused.json
+
+  /api/v1/plans/{plan_id}/undo:
+    post:
+      tags: [Proposals]
+      operationId: undoPlan
+      summary: Restore the previous revision's content as a new revision
+      description: |-
+        Appends revision N + 1 whose content equals revision N - 1; history is never
+        deleted. Undoing twice therefore returns to the later content. Idempotency-Key
+        semantics match accept. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: The revision the client is looking at.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpectedRevisionRequest'
+      responses:
+        '200':
+          description: The resulting revision.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MutationResult'
+              examples:
+                undone:
+                  summary: Undone as revision 3
+                  externalValue: examples/mutation-result-undo.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+        '409':
+          description: Stale revision or nothing to undo.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                staleRevision:
+                  summary: expected_revision is behind the current revision
+                  externalValue: examples/error-stale-revision.json
+                nothingToUndo:
+                  summary: Plan is at revision 1
+                  externalValue: examples/error-nothing-to-undo.json
+        '422':
+          description: The Idempotency-Key was used for a different request.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                reusedKey:
+                  summary: Same key, different request
+                  externalValue: examples/error-retry-id-reused.json
+
+  /api/v1/plans/{plan_id}/revisions:
+    get:
+      tags: [Plans]
+      operationId: listRevisions
+      summary: List a plan's revision history
+      description: Oldest first. Summaries only; revisions are immutable and never deleted. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      responses:
+        '200':
+          description: Revision summaries.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionList'
+              examples:
+                history:
+                  summary: Three revisions
+                  externalValue: examples/revisions.json
+        '400':
+          $ref: '#/components/responses/WriteInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/PlanNotFound'
+
+  /api/v1/capabilities:
+    get:
+      tags: [Capabilities]
+      operationId: getCapabilities
+      summary: Read what this client may do
+      description: |-
+        can_edit_plans is true only when the API is backed by SQLite and the request
+        comes from a loopback address. Clients must use it, never their own guess, to
+        decide whether to offer editing. The server re-checks authorization on every
+        mutation regardless of this value.
+      responses:
+        '200':
+          description: Capabilities for this client.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capabilities'
+              examples:
+                editable:
+                  summary: Editing available
+                  externalValue: examples/capabilities.json
 components:
   parameters:
     PlanId:
@@ -196,7 +761,73 @@ components:
         maxLength: 128
         pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
       example: plan_2026_10_19
+    ProposalId:
+      name: proposal_id
+      in: path
+      required: true
+      description: Opaque proposal identifier returned when the proposal was created.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+      example: prop_9b1f0c2e4d5a4f7c8a3e6d1b2c0f4a55
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |-
+        Client-generated retry id, 1 to 128 printable ASCII characters. Reuse the same key
+        to retry the same request safely (the original result is replayed with
+        replayed: true). Reusing it for a different request returns 422 retry_id_reused.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[\x21-\x7e]+$'
+      example: 3f0c8e52-6c1a-4d0e-9a53-0d6a2d9d7c11
   responses:
+    WriteInvalidRequest:
+      description: Malformed JSON body, unknown or invalid field, bad identifier, missing Idempotency-Key, or a week_start that is not a Monday (invalid_week).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unknownField:
+              summary: Invalid or unknown body field
+              externalValue: examples/error-invalid-body.json
+            missingKey:
+              summary: Idempotency-Key header missing
+              externalValue: examples/error-missing-idempotency-key.json
+            invalidWeek:
+              summary: week_start is not a Monday
+              externalValue: examples/error-invalid-week.json
+    WriteForbidden:
+      description: Mutations and history need a loopback client (forbidden) and a SQLite-backed API (read_only, JSON snapshot mode).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            forbidden:
+              summary: Non-loopback client attempted a change
+              externalValue: examples/error-forbidden.json
+            readOnly:
+              summary: API is serving the JSON snapshot
+              externalValue: examples/error-read-only.json
     InvalidRequest:
       description: Missing or malformed input, or an invalid date range.
       headers:
@@ -508,6 +1139,171 @@ components:
           type: string
         notes:
           type: [string, 'null']
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [can_edit_plans]
+      properties:
+        can_edit_plans:
+          type: boolean
+          description: True only for a loopback client of a SQLite-backed API.
+    CreatePlanRequest:
+      type: object
+      additionalProperties: false
+      required: [week_start]
+      properties:
+        week_start:
+          type: string
+          format: date
+          description: Monday of the household week to create.
+        seed:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          description: Solver seed; defaults to 42.
+    ProposeRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        seed:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          description: Solver seed; defaults to the current plan seed + 1.
+    ExpectedRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+    SlotChange:
+      type: object
+      additionalProperties: false
+      required: [assignment_id, date, meal, kind, before, after]
+      properties:
+        assignment_id:
+          type: string
+          minLength: 1
+        date:
+          type: string
+          format: date
+        meal:
+          type: string
+          enum: [lunch, dinner]
+        kind:
+          type: string
+          enum: [changed, added, removed]
+        before:
+          oneOf:
+            - $ref: '#/components/schemas/MealAssignment'
+            - type: 'null'
+        after:
+          oneOf:
+            - $ref: '#/components/schemas/MealAssignment'
+            - type: 'null'
+    Proposal:
+      type: object
+      additionalProperties: false
+      required: [proposal_id, plan_id, base_revision, base_snapshot_id, seed, created_at, expires_at, identical, changes, plan, shopping_list]
+      properties:
+        proposal_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        base_revision:
+          type: integer
+          minimum: 1
+          description: The current revision this proposal was computed against.
+        base_snapshot_id:
+          type: string
+          minLength: 1
+        seed:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        identical:
+          type: boolean
+          description: True when accepting would change nothing; plan is then the current content.
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlotChange'
+        plan:
+          $ref: '#/components/schemas/Plan'
+        shopping_list:
+          $ref: '#/components/schemas/ShoppingList'
+    MutationResult:
+      type: object
+      additionalProperties: false
+      required: [plan_id, revision, snapshot_id, changed, replayed]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        revision:
+          type: integer
+          minimum: 1
+          description: The current revision after the call (unchanged when changed is false).
+        snapshot_id:
+          type: string
+          minLength: 1
+        changed:
+          type: boolean
+        replayed:
+          type: boolean
+          description: True when this is a replay of an earlier request with the same Idempotency-Key.
+    RevisionSummary:
+      type: object
+      additionalProperties: false
+      required: [revision, snapshot_id, source, created_at]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+        snapshot_id:
+          type: string
+          minLength: 1
+        source:
+          type: string
+          enum: [import, create, regenerate, undo]
+        created_at:
+          type: string
+          format: date-time
+    RevisionList:
+      type: object
+      additionalProperties: false
+      required: [plan_id, items]
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        items:
+          type: array
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/RevisionSummary'
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -520,7 +1316,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, plan_not_found, snapshot_changed, source_unavailable, source_invalid]
+              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, generation_busy]
             message:
               type: string
             details:

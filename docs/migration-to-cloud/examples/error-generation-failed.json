@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "generation_failed",
+    "message": "plan generation failed: No feasible solution found",
+    "details": []
+  }
+}

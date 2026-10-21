@@ -416,6 +416,13 @@ class SqlitePlanRepository:
             ).fetchone()
         return _revision_from_row(row) if row else None
 
+    def list_revisions(self, plan_id: str) -> list[PlanRevision]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM plan_revisions WHERE plan_id = ? ORDER BY revision", (plan_id,)
+            ).fetchall()
+        return [_revision_from_row(r) for r in rows]
+
     def append_revision(
         self,
         plan_id: str,

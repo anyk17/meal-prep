@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_week",
+    "message": "week_start must be a Monday",
+    "details": []
+  }
+}

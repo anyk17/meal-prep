@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "duplicate_week",
+    "message": "A plan already exists for week 2026-10-26.",
+    "details": []
+  }
+}

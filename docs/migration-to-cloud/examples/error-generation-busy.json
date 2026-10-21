@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "generation_busy",
+    "message": "A plan is already being generated. Try again shortly.",
+    "details": []
+  }
+}

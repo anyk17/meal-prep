@@ -83,6 +83,20 @@ class PlanWorkflowService:
     def get_plan_for_week(self, week_start: date) -> WeeklyPlan | None:
         return self._repo.get_plan_by_week(week_start)
 
+    def list_revisions(self, plan_id: str) -> list[PlanRevision]:
+        """Return the full revision history, oldest first. Never runs the solver."""
+        self._plan(plan_id)
+        return self._repo.list_revisions(plan_id)
+
+    def get_proposal(self, plan_id: str, proposal_id: str) -> Proposal:
+        """Return a live proposal for this plan; unknown or foreign ids are not found."""
+        proposal = self._repo.get_proposal(proposal_id)
+        if proposal is None or proposal.plan_id != plan_id:
+            raise ProposalNotFound(proposal_id)
+        if self._clock() >= proposal.expires_at:
+            raise ProposalExpired(proposal_id)
+        return proposal
+
     # ------------------------------------------------------------ create
 
     def create_plan(self, week_start: date, seed: int = 42) -> PlanRevision:
@@ -152,9 +166,10 @@ class PlanWorkflowService:
         self._repo.save_proposal(proposal)
         return proposal
 
-    def discard_proposal(self, proposal_id: str) -> None:
-        """Drop a proposal. Creates no revision; unknown ids are an error."""
-        if self._repo.get_proposal(proposal_id) is None:
+    def discard_proposal(self, proposal_id: str, plan_id: str | None = None) -> None:
+        """Drop a proposal (optionally scoped to a plan). Creates no revision."""
+        proposal = self._repo.get_proposal(proposal_id)
+        if proposal is None or (plan_id is not None and proposal.plan_id != plan_id):
             raise ProposalNotFound(proposal_id)
         self._repo.delete_proposal(proposal_id)
 

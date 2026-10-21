@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "input_basis_changed",
+    "message": "Recipes, rules, or pantry changed since the preview. Generate a new proposal.",
+    "details": []
+  }
+}

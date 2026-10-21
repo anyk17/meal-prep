@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": "stale_revision",
+    "message": "The plan changed since you loaded it. Refetch and try again.",
+    "details": [
+      {
+        "field": "expected_revision",
+        "message": "1"
+      },
+      {
+        "field": "actual_revision",
+        "message": "2"
+      }
+    ]
+  }
+}

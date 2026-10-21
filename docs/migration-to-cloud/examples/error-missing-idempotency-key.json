@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The request is invalid.",
+    "details": [
+      {
+        "field": "Idempotency-Key",
+        "message": "exactly one Idempotency-Key header of 1 to 128 printable ASCII characters is required"
+      }
+    ]
+  }
+}

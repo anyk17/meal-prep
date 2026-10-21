@@ -183,6 +183,9 @@ class PlanWorkflowRepository(Protocol):
         new_revision (revision == expected_revision + 1), move the pointer, and
         store the retry record if given. Raises StaleRevision on mismatch."""
 
+    def list_revisions(self, plan_id: str) -> list[PlanRevision]:
+        """Return every stored revision of a plan, oldest first."""
+
     def get_retry(self, plan_id: str, retry_id: str) -> RetryRecord | None:
         """Return a stored retry record, or None."""
 
@@ -313,6 +316,11 @@ class InMemoryPlanRepository:
 
     def get_revision(self, plan_id: str, revision: int) -> PlanRevision | None:
         return self._revisions.get((plan_id, revision))
+
+    def list_revisions(self, plan_id: str) -> list[PlanRevision]:
+        return [
+            rev for (pid, _), rev in sorted(self._revisions.items()) if pid == plan_id
+        ]
 
     def append_revision(
         self,

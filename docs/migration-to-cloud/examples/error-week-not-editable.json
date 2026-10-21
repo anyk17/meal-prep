@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "week_not_editable",
+    "message": "Regeneration is only allowed for future weeks.",
+    "details": []
+  }
+}

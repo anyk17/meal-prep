@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "linked_pair_split",
+    "message": "A linked lunch and dinner must change together.",
+    "details": []
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "proposal_not_found",
+    "message": "No such proposal; it may have been discarded or accepted.",
+    "details": []
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "retry_id_reused",
+    "message": "This Idempotency-Key was already used for a different request.",
+    "details": []
+  }
+}

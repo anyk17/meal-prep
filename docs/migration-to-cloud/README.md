@@ -301,6 +301,18 @@ cd /home/julopez/dev/meal-prep/site
 npm run dev:static -- --port 5174
 ```
 
+### Run Phase 3 locally
+
+Plan changes (create, preview/accept regeneration, undo) need the SQLite store. Import once, then start Flask against it:
+
+```sh
+cd /home/julopez/dev/meal-prep
+.venv/bin/python -m mealplanner.db import --fixture   # inputs + the sample week into var/mealplanner.db
+MEALPLANNER_DB=var/mealplanner.db .venv/bin/python -m mealplanner.api
+```
+
+Then start the frontend as above (`npm run dev:api` in `site/`). `GET /api/v1/capabilities` reports `can_edit_plans`, which is true only for loopback clients of a SQLite-backed API. Without `MEALPLANNER_DB` the API serves the JSON snapshot and rejects writes with `403 read_only`; non-loopback writes get `403 forbidden`. Optional settings: `MEALPLANNER_TIMEZONE` (default `America/Bogota`, also the clock for "future week" checks), `MEALPLANNER_SOLVER_TIMEOUT_SECONDS` (default 30) and `MEALPLANNER_MAX_CONCURRENT_GENERATIONS` (default 1; extra requests get `503 generation_busy` with `Retry-After`).
+
 Open `http://127.0.0.1:5174/meal-prep/`. This uses the checked-in populated publication bundle, not newly generated CLI files. `VITE_STATIC_BUNDLE=empty npm run dev:static -- --port 5174` exercises the empty publication. Neither mode offers generation, persisted edits, or swaps yet; grocery checkmarks remain browser-local.
 
 The default view is explicitly October 19–25, 2026. To anchor API data to another Monday, set `MEALPLANNER_WEEK_START=YYYY-MM-DD` before starting Flask and set matching `VITE_DEFAULT_FROM=YYYY-MM-DD VITE_DEFAULT_TO=YYYY-MM-DD` before starting Vite. The API timezone defaults to `America/Bogota` and accepts `MEALPLANNER_TIMEZONE`. Static sample dates remain those in their manifests. Date navigation is a later milestone.

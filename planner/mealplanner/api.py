@@ -5,16 +5,19 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
-from datetime import date
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .json_snapshot import (
     JsonPlanReadRepository,
     SourceInvalidError,
     SourceUnavailableError,
 )
+from .write_api import GenerationGate, register_write_routes
 from .read_api import (
     InvalidRequest,
     PlanNotFound,
@@ -28,6 +31,8 @@ DEFAULT_PLAN_PATH = PROJECT_ROOT / "site/public/plan.json"
 DEFAULT_SHOPPING_PATH = PROJECT_ROOT / "site/public/shopping_list.json"
 DEFAULT_PANTRY_PATH = PROJECT_ROOT / "data/pantry.yml"
 DEFAULT_WEEK_START = date(2026, 10, 19)
+DEFAULT_SOLVER_TIMEOUT_SECONDS = 30.0
+DEFAULT_MAX_CONCURRENT_GENERATIONS = 1
 PLAN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 INTEGER_PATTERN = re.compile(r"^[0-9]+$")
@@ -79,6 +84,60 @@ def _configured_week_start(value: str | date | None) -> date:
     return result
 
 
+def _env_number(name: str, default: float, cast: Callable[[str], Any]) -> Any:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = cast(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _is_loopback_request() -> bool:
+    from flask import request
+
+    try:
+        return ip_address(request.remote_addr or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _build_workflow_service(
+    db_path: Path | str,
+    timezone: str | None,
+    clock: Callable[[], datetime] | None,
+    generator: Callable[..., Any] | None,
+    solver_timeout_seconds: float | None,
+    proposal_ttl: timedelta | None,
+) -> Any:
+    from .generation import generate
+    from .plan_workflows import DEFAULT_PROPOSAL_TTL, PlanWorkflowService
+    from .sqlite_store import SqlitePlannerInputReader, SqlitePlanRepository
+
+    zone = timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota")
+    tz = ZoneInfo(zone)  # ZoneInfoNotFoundError is a KeyError; surfaced as source failure
+    timeout = solver_timeout_seconds or _env_number(
+        "MEALPLANNER_SOLVER_TIMEOUT_SECONDS", DEFAULT_SOLVER_TIMEOUT_SECONDS, float
+    )
+    solve = generator or (
+        lambda inputs, seed, generated_at: generate(
+            inputs, seed, generated_at, max_time_seconds=timeout
+        )
+    )
+    return PlanWorkflowService(
+        SqlitePlanRepository(db_path),
+        SqlitePlannerInputReader(db_path),
+        clock or (lambda: datetime.now(tz)),
+        generator=solve,
+        timezone=zone,
+        proposal_ttl=proposal_ttl or DEFAULT_PROPOSAL_TTL,
+    )
+
+
 def create_app(
     repository: PlanReadRepository | None = None,
     *,
@@ -88,10 +147,18 @@ def create_app(
     week_start: str | date | None = None,
     timezone: str | None = None,
     db_path: Path | str | None = None,
+    clock: Callable[[], datetime] | None = None,
+    generator: Callable[..., Any] | None = None,
+    solver_timeout_seconds: float | None = None,
+    max_concurrent_generations: int | None = None,
+    proposal_ttl: timedelta | None = None,
 ) -> Any:
-    """Create the read-only API. Source files are loaded and validated once.
+    """Create the API. Source files are loaded and validated once.
 
-    With db_path (or MEALPLANNER_DB) reads come from the SQLite store instead.
+    With db_path (or MEALPLANNER_DB) reads come from the SQLite store and the
+    plan write routes are enabled (loopback clients only). Otherwise the API is
+    read-only. clock must return a timezone-aware datetime (tests inject one);
+    the default reads the household timezone (MEALPLANNER_TIMEZONE).
     """
     try:
         from flask import Flask, jsonify, request
@@ -105,6 +172,8 @@ def create_app(
     app.config["JSON_SORT_KEYS"] = False
     app.config["PLAN_READ_SERVICE"] = None
     app.config["PLAN_SOURCE_FAILURE"] = None
+    app.config["PLAN_WORKFLOW_SERVICE"] = None
+    app.config["PLAN_WRITE_FAILURE"] = False
     sqlite_path = db_path or os.environ.get("MEALPLANNER_DB")
     if repository is not None:
         app.config["PLAN_READ_SERVICE"] = PlanReadService(repository)
@@ -114,9 +183,12 @@ def create_app(
             from .sqlite_store import DatabaseError, SqlitePlanReadAdapter
 
             app.config["PLAN_READ_SERVICE"] = PlanReadService(SqlitePlanReadAdapter(sqlite_path))
+            app.config["PLAN_WORKFLOW_SERVICE"] = _build_workflow_service(
+                sqlite_path, timezone, clock, generator, solver_timeout_seconds, proposal_ttl
+            )
         except DatabaseError:
             app.config["PLAN_SOURCE_FAILURE"] = "source_unavailable"
-        except (sqlite3.Error, ValueError):  # unreadable or corrupt file
+        except (sqlite3.Error, ValueError, KeyError):  # unreadable or corrupt file, bad timezone
             app.config["PLAN_SOURCE_FAILURE"] = "source_invalid"
     else:
         try:
@@ -145,15 +217,20 @@ def create_app(
     def reject_non_loopback_api_clients():
         if not request.path.startswith("/api/"):
             return None
-        try:
-            remote_ip = ip_address(request.remote_addr or "")
-        except ValueError:
-            remote_ip = None
-        if remote_ip is None or not remote_ip.is_loopback:
+        if not _is_loopback_request():
+            if request.method not in ("GET", "HEAD", "OPTIONS"):
+                return _error(403, "forbidden", "Plan changes are allowed from this machine only.")
             return _error(
                 403, "invalid_request", "This development API accepts loopback connections only."
             )
         return None
+
+    limit = max_concurrent_generations or _env_number(
+        "MEALPLANNER_MAX_CONCURRENT_GENERATIONS", DEFAULT_MAX_CONCURRENT_GENERATIONS, int
+    )
+    gate = GenerationGate(limit)
+    app.config["GENERATION_GATE"] = gate
+    register_write_routes(app, _error, _is_loopback_request, gate)
 
     def service() -> PlanReadService | None:
         failure = app.config["PLAN_SOURCE_FAILURE"]

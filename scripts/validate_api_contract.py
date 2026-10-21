@@ -31,11 +31,24 @@ EXAMPLES = ROOT / "docs/migration-to-cloud/examples"
 PLAN_FIXTURE = ROOT / "site/public/plan.json"
 SHOP_FIXTURE = ROOT / "site/public/shopping_list.json"
 PANTRY_FILE = ROOT / "data/pantry.yml"
+# Reviewed operations only: adding any path or method requires editing this table.
 EXPECTED_PATHS = {
-    "/api/v1/plans": {"get"},
+    "/api/v1/plans": {"get", "post"},
     "/api/v1/plans/{plan_id}": {"get"},
     "/api/v1/plans/{plan_id}/shopping-list": {"get"},
+    "/api/v1/plans/{plan_id}/revisions": {"get"},
+    "/api/v1/plans/{plan_id}/proposals": {"post"},
+    "/api/v1/plans/{plan_id}/proposals/{proposal_id}": {"get", "delete"},
+    "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept": {"post"},
+    "/api/v1/plans/{plan_id}/undo": {"post"},
+    "/api/v1/capabilities": {"get"},
 }
+# Mutations that must carry a required Idempotency-Key header.
+IDEMPOTENT_PATHS = {
+    "/api/v1/plans/{plan_id}/proposals/{proposal_id}/accept",
+    "/api/v1/plans/{plan_id}/undo",
+}
+HTTP_METHODS = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
@@ -188,9 +201,12 @@ def check_contract(spec, checks):
             if m.lower()
             in {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
         }
-        checks.require(methods == {"get"}, f"{path} must advertise only GET")
+        checks.require(
+            methods == EXPECTED_PATHS.get(path),
+            f"{path} must advertise exactly {sorted(EXPECTED_PATHS.get(path, []))}",
+        )
         for method, op in path_item.items():
-            if method.lower() != "get":
+            if method.lower() not in HTTP_METHODS:
                 continue
             operation_ids.append(op.get("operationId"))
             params = [
@@ -219,7 +235,7 @@ def check_contract(spec, checks):
                             f"{path} parameter {p.get('name')} example violates schema: {e.message}"
                         )
             for name in ("from", "to"):
-                if path == "/api/v1/plans":
+                if path == "/api/v1/plans" and method.lower() == "get":
                     checks.require(
                         any(
                             p.get("in") == "query"
@@ -229,6 +245,37 @@ def check_contract(spec, checks):
                         ),
                         f"{path}: required query parameter {name} missing",
                     )
+            if method.lower() == "post":
+                body = dereference(spec, op.get("requestBody", {}))
+                checks.require(
+                    body.get("required") is True, f"{method.upper()} {path}: requestBody must be required"
+                )
+                body_schema = dereference(
+                    spec,
+                    body.get("content", {}).get("application/json", {}).get("schema", {}),
+                )
+                checks.require(
+                    body_schema.get("additionalProperties") is False
+                    and bool(body_schema.get("required")),
+                    f"{method.upper()} {path}: request body schema must forbid unknown fields and require fields",
+                )
+            if method.lower() != "get":
+                has_key = any(
+                    p.get("in") == "header"
+                    and p.get("name") == "Idempotency-Key"
+                    and p.get("required") is True
+                    for p in params
+                )
+                checks.require(
+                    has_key == (path in IDEMPOTENT_PATHS and method.lower() == "post"),
+                    f"{method.upper()} {path}: required Idempotency-Key header must be present exactly on accept and undo",
+                )
+                for status in ("403",):
+                    if path != "/api/v1/plans" or method.lower() == "post":
+                        checks.require(
+                            status in op.get("responses", {}),
+                            f"{method.upper()} {path}: mutation must document {status}",
+                        )
             if path.endswith("/shopping-list"):
                 for name in ("revision", "snapshot_id"):
                     checks.require(
@@ -250,7 +297,7 @@ def check_contract(spec, checks):
                     f"{path} {status}: Cache-Control must be no-store",
                 )
     checks.require(
-        None not in operation_ids, "every GET operation must have operationId"
+        None not in operation_ids, "every operation must have operationId"
     )
     checks.require(
         len(operation_ids) == len(set(operation_ids)),
@@ -614,6 +661,57 @@ def check_fixture_normalization(plan, shopping, checks):
     )
 
 
+def check_proposal_example(pantry):
+    """The proposal example's candidate plan/shopping list must be a valid snapshot."""
+    proposal = load_json(EXAMPLES / "proposal.json")
+    plan, shopping = proposal["plan"], proposal["shopping_list"]
+    summary_keys = (
+        "plan_id", "week_start", "week_end", "timezone", "revision", "snapshot_id",
+        "generated_at", "seed",
+    )
+    errors = semantic_errors(plan, shopping, pantry, [{k: plan[k] for k in summary_keys}])
+    if proposal["plan_id"] != plan["plan_id"] or proposal["base_revision"] + 1 != plan["revision"]:
+        errors.append("proposal example ids/revisions must be consistent")
+    if proposal["identical"] != (not proposal["changes"]):
+        errors.append("proposal example identical must equal 'no changes'")
+    return [f"proposal.json: {e}" for e in errors]
+
+
+def self_test_contract(spec):
+    """Mutate the contract and prove the structural checks reject each mutation."""
+    mutations = {
+        "unreviewed path": lambda d: d["paths"].__setitem__(
+            "/api/v1/admin", {"get": {"operationId": "x", "responses": {}}}
+        ),
+        "unreviewed method": lambda d: d["paths"]["/api/v1/plans/{plan_id}"].__setitem__(
+            "delete", {"operationId": "deletePlan", "responses": {}}
+        ),
+        "missing Idempotency-Key": lambda d: d["paths"][
+            "/api/v1/plans/{plan_id}/undo"
+        ]["post"].__setitem__("parameters", [{"$ref": "#/components/parameters/PlanId"}]),
+        "open request body": lambda d: d["components"]["schemas"]["CreatePlanRequest"].__setitem__(
+            "additionalProperties", True
+        ),
+        "cacheable response": lambda d: d["components"]["responses"]["WriteForbidden"][
+            "headers"
+        ]["Cache-Control"]["schema"].__setitem__("const", "public"),
+        "missing 403": lambda d: d["paths"]["/api/v1/plans/{plan_id}/undo"]["post"][
+            "responses"
+        ].pop("403"),
+    }
+    for name, mutate in mutations.items():
+        mutated = copy.deepcopy(spec)
+        mutate(mutated)
+        probe = Checks()
+        try:
+            check_contract(mutated, probe)
+        except Exception:  # noqa: BLE001 - a crash also counts as rejection
+            continue
+        if not probe.errors:
+            raise ValueError(f"contract self-test failed to reject mutation: {name}")
+    return len(mutations)
+
+
 def self_test(plan, shopping, pantry, summaries, spec):
     cases = []
     changed = copy.deepcopy(plan)
@@ -655,8 +753,10 @@ def self_test(plan, shopping, pantry, summaries, spec):
         raise ValueError(
             "self-test failed to reject invalid date format through the response schema"
         )
+    contract_cases = self_test_contract(spec)
     print(
-        f"self-test passed ({len(cases)} targeted semantic mutations and invalid date format rejected)"
+        f"self-test passed ({len(cases)} targeted semantic mutations, invalid date format, "
+        f"and {contract_cases} contract mutations rejected)"
     )
 
 
@@ -692,6 +792,7 @@ def main():
         checks.require(empty == {"items": []}, "plans-empty.json must be {items: []}")
         pantry = set(yaml.safe_load(PANTRY_FILE.read_text(encoding="utf-8")) or [])
         checks.errors.extend(semantic_errors(plan, shopping, pantry, summaries))
+        checks.errors.extend(check_proposal_example(pantry))
         check_fixture_normalization(plan, shopping, checks)
         full_validation_passed = False
         if args.openapi_schema:

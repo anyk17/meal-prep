@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "read_only",
+    "message": "Plan changes need the SQLite-backed API (MEALPLANNER_DB).",
+    "details": []
+  }
+}

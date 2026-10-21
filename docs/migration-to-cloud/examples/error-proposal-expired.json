@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "proposal_expired",
+    "message": "The proposal expired. Generate a new one.",
+    "details": []
+  }
+}
