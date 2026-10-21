@@ -73,3 +73,10 @@ flowchart LR
 | SQL, YAML, file or network access | `adapters/` |
 | A new HTTP route or CLI command | `entrypoints/` (delegate to an application service) |
 | Wiring adapters to services | `entrypoints/` |
+
+## Deployment and trust boundaries (phase 6)
+
+- **One image, state outside it.** The container holds code and the API-mode frontend; SQLite lives in the `/data` volume. Entry points (gunicorn, `db_cli`) wire adapters exactly as in development.
+- **Images are trusted by digest and provenance.** GitHub Actions builds and attests the image; the NAS runs `image@sha256:…` and an update starts with `gh attestation verify`. A moved tag cannot change what runs.
+- **The only secret is the publish deploy key.** Write access to `jflopezo91/meal-plan` only, read from `/run/secrets/deploy_key` by the publication push adapter; it never reaches the browser, an image, a repository or an environment variable. Worst case if leaked: wrong public meal data, never code changes.
+- **Publishing is outbound only.** The app pushes a validated bundle; the `meal-plan` workflow builds the static site from public `meal-prep` code at a pinned commit. Nothing on GitHub can call the NAS.
