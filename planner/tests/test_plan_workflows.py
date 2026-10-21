@@ -153,6 +153,22 @@ def test_create_without_seed_uses_the_week_seed(env: Env) -> None:
     assert meals(first) != meals(second)
 
 
+
+def test_regenerate_default_seed_is_fresh_and_never_the_current_one(env: Env) -> None:
+    """Two weeks that share a seed (and plan) must not stay identical after Regenerate."""
+    nxt = FUTURE + timedelta(days=7)
+    a, b = env.svc.create_plan(FUTURE, seed=42), env.svc.create_plan(nxt, seed=42)
+    meals = lambda snapshot: [s["recipe_id"] for s in snapshot.plan["slots"]]  # noqa: E731
+    assert meals(a.snapshot) == meals(b.snapshot)  # the situation the old seed + 1 default kept
+    seeds = iter([42, 42, 1001, 2002])  # the current seed is drawn first and must be skipped
+    svc = PlanWorkflowService(
+        env.repo, env.reader, env.clock, generator=env.solver, seed_factory=lambda: next(seeds)
+    )
+    pa, pb = svc.propose_regeneration(a.plan_id, 1), svc.propose_regeneration(b.plan_id, 1)
+    assert (pa.seed, pb.seed) == (1001, 2002)
+    assert meals(pa.snapshot) != meals(pb.snapshot)
+
+
 def test_create_week_rules(env: Env) -> None:
     with pytest.raises(InvalidWeek):
         env.svc.create_plan(date(2026, 10, 27))

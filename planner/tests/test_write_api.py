@@ -117,6 +117,20 @@ def accept_url(proposal: dict) -> str:
 # ---- create
 
 
+
+def test_create_without_seed_gives_each_week_its_own_plan(client) -> None:
+    """Regression: the route defaulted the seed to 42, so every created week was identical."""
+    from mealplanner.domain.month import week_seed
+
+    weeks = [date.fromisoformat(FUTURE) + timedelta(days=7 * i) for i in range(2)]
+    plans = [
+        ok(client.post("/api/v1/plans", json={"week_start": w.isoformat()}), 201, "Plan") for w in weeks
+    ]
+    assert [p["seed"] for p in plans] == [week_seed(w) for w in weeks]
+    meals = [[s["recipe_id"] for s in p["slots"]] for p in plans]
+    assert meals[0] != meals[1]
+
+
 def test_create_plan_then_duplicate_and_past(client) -> None:
     plan = make_plan(client)
     assert plan["plan_id"] == FUTURE_ID and plan["revision"] == 1
