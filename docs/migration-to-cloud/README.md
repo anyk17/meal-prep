@@ -2,7 +2,7 @@
 
 Code layout and dependency rules: see [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Status:** Phases 1–5, 6a (container image), 6b (Publish button) and 6c (household login) are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Home users can also swap any today-or-later meal to any catalog recipe (rules are advisory for swaps). The home app publishes selected months to https://jflopezo91.github.io/meal-plan/ (first live publish 2026-10-21). Viewing is open on the home network; changes and publishing need a household login (users are created with `db_cli user add`). Next: 6d go-live on the UGREEN DXP2800 NAS.
+**Status:** Phases 1–5, 6a (container image), 6b (Publish button) and 6c (household login) are complete on `feature/cloud-migration`. Saved weeks live in SQLite with append-only revisions; home users create, regenerate, accept/discard, undo, and fill months in API mode. Month/year navigation works in both modes. Shopping trips cover sets of weeks (open → done) and show what to buy; the manual exporter publishes plans and trips to `publication/`, which the Pages build serves read-only. Weekly rules are domain specifications; the OR-Tools solver is an adapter behind a port (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Home users can also swap any today-or-later meal to any catalog recipe (rules are advisory for swaps). The home app publishes selected months to https://jflopezo91.github.io/meal-plan/ (first live publish 2026-10-21). Viewing is open on the home network; changes and publishing need a household login (users are created with `db_cli user add`). Shelf-life groups (5b) and per-week bought tracking (5c) are complete. Next: 6d — release pipeline (Komodo on a portable workstation orchestrator) and go-live on the UGREEN DXP2800 NAS.
 
 ## Starting point and first milestone
 
@@ -307,7 +307,43 @@ Order chosen so every step is testable on the development machine first, and not
 - The loopback rule and `MEALPLANNER_TRUST_NETWORK_PEERS` are gone.
 Users: `db_cli user add|passwd|disable|enable|logout-all|remove <username>` and `user list` (passwords come from a hidden prompt or, with `--password-stdin`, one line of stdin; never from an argument). No public registration. `Secure` cookies are accepted by Chromium and Firefox on `http://localhost` and `http://127.0.0.1` but not over plain HTTP to a LAN address; the LAN setup is decided in 6d.
 
-**6d: NAS go-live.** Home-network access starts as plain HTTP, like most NAS apps (Jellyfin serves `http://<nas>:8096` the same way): Compose publishes `8080:8080` on the LAN and sets `MEALPLANNER_COOKIE_SECURE=0`. Viewing needs no login; the login password crosses the home Wi-Fi unencrypted, an accepted trade-off on a WPA2/WPA3 network. UGOS Pro has no built-in reverse proxy or Let's Encrypt for apps, so HTTPS, if wanted later, is a Caddy container in the same Compose project with a DNS-challenge certificate (e.g. a DuckDNS name pointing at the NAS's LAN address; no inbound ports), then `MEALPLANNER_TRUSTED_PROXIES=1`, the app port no longer published and `Secure` cookies back on. No app change is needed for that. First a throwaway Compose project in the UGOS Docker app that only prints a mounted `secrets:` file, to confirm the secret mechanism (fallback: a read-only bind mount of the same file). Generate the deploy key on the NAS over SSH (`chmod 600`), add only the public key to GitHub, then turn SSH off. Deploy by digest, measure solver time on the N100, and set container memory/CPU limits from that. SQLite-consistent backups (`db_cli backup`) copied somewhere independent of the NAS, with a restore test into a clean container. Document update, rollback, migration and restore. Confirm no port forward, tunnel, CORS trust or NAS admin endpoint exposes the app, and check public cache behavior from outside the LAN.
+**6d: NAS go-live and release pipeline.**
+
+*Serving on the LAN.* Home-network access starts as plain HTTP, like most NAS apps (Jellyfin serves `http://<nas>:8096` the same way): Compose publishes `8080:8080` on the LAN and sets `MEALPLANNER_COOKIE_SECURE=0`. Viewing needs no login; the login password crosses the home Wi-Fi unencrypted, an accepted trade-off on a WPA2/WPA3 network. UGOS Pro has no built-in reverse proxy or Let's Encrypt for apps, so HTTPS, if wanted later, is a Caddy container in the same Compose project with a DNS-challenge certificate (e.g. a DuckDNS name pointing at the NAS's LAN address; no inbound ports), then `MEALPLANNER_TRUSTED_PROXIES=1`, the app port no longer published and `Secure` cookies back on. No app change is needed for that.
+
+*Release pipeline (CD).* A workstation is the orchestrator; GitHub builds and attests; the NAS only ever pulls an image by digest. Nothing on the NAS depends on the workstation at run time.
+
+```
+ workstation                         GitHub                         NAS (UGOS)
+ git push ──────────────────▶ container.yml: tests → image → GHCR digest + attestation
+ scripts/release.sh            (trust gate) CI green · digest of this commit · attestation verified
+                               → digest written to deploy/docker-compose.yml → commit "release vYYYY.MM.DD[.N]" + tag → push main
+ Komodo Core (127.0.0.1:9120)  Procedure "release meal-prep":
+                                 a. db_cli backup ───────────────────────────────▶ Periphery agent
+                                 b. Deploy Stack (git main, deploy/docker-compose.yml) ▶ pull by digest, up -d
+                                 c. /healthz + revision == release commit
+                               rollback = redeploy the previous release (DB backup taken before every release)
+```
+
+- **Releases** are git tags on `main` (so `feature/cloud-migration` is merged first). `release.sh` refuses unless CI passed for the commit, GHCR has an image for it, and `gh attestation verify` shows our `container.yml` built it from this repository (needs a `gh` with `attestation`). It never builds images. GitHub cannot reach a workstation-hosted Komodo, so there is no deploy-on-push webhook: releases are deliberate (Run in the UI, or `release.sh` calling the Komodo API).
+- **Komodo** (open source): Core + its database run in Docker on the workstation from Komodo's official Compose file with **pinned versions**, UI bound to `127.0.0.1`. The **Periphery** agent runs on the NAS as one UGOS Project. Periphery can drive Docker on the NAS (root-equivalent), so: Core connects to Periphery (WSL reaches the LAN easily, not the reverse); the NAS firewall allows the Periphery port only from the workstation's address; Core↔Periphery authentication per the docs of the pinned version (it changed in Komodo 2.x). The meal-prep app is a Komodo **Stack** from the public `meal-prep` repo (no git credentials). The deploy key stays a file in `/volume1/docker/meal-prep/secrets`; Komodo only deploys a Compose file that references it.
+- **Portable orchestrator.** Losing the workstation must not stop releases:
+  - Everything is code under `ops/`: `ops/komodo/compose.yaml` (+ `compose.env.example`, no secrets), Komodo resources (server, stack, procedure) declared as TOML and applied with a Komodo Resource Sync, `ops/bootstrap.sh` (checks Docker and `gh`, writes `compose.env`, starts Core, runs the sync) and `ops/README.md`.
+  - A **CD recovery kit** in the household password manager: Komodo admin login, the Core↔Periphery key/passkey, the NAS admin SSH key (setup only). GitHub access is re-done with `gh auth login`. The publish deploy key is **not** in the kit: it lives only on the NAS.
+  - Komodo's database holds only history and logs; the truth is git (tags, digest in the Compose file) and the NAS (containers, DB backups). Optional: Komodo's own backup to the NAS.
+  - **Break-glass without Komodo:** `release.sh --direct` runs the same backup → deploy → health check over SSH, and the UGOS Docker UI can redeploy the project from the released Compose file.
+  - **Move to a new machine:** install Docker and `gh`, clone, `ops/bootstrap.sh` with the kit, allow the new address in the NAS firewall rule (re-pair Core if asked), confirm the Stack shows the running release. Rehearse this once (fresh WSL distro or another PC) before calling 6d done.
+
+*Go-live steps.*
+1. Merge `feature/cloud-migration` into `main`; build and attest the first release image.
+2. NAS prep: enable SSH (setup only), create `/volume1/docker/meal-prep/{data,secrets}`. A throwaway Compose project that only prints a mounted `secrets:` file confirms the secret mechanism (fallback: a read-only bind mount of the same file).
+3. Generate the publish deploy key on the NAS (`chmod 600`), add only its public key to `meal-plan`, revoke the WSL dev key.
+4. Komodo Core on the workstation (`ops/`), Periphery on the NAS, firewall rule, Resource Sync.
+5. First deploy by digest; copy the current database (`db_cli backup` from WSL, restore on the NAS); create the household login; first Publish from the NAS.
+6. Measure solver time on the N100 and set container memory/CPU limits from it.
+7. Backups: scheduled `db_cli backup` copied somewhere independent of the NAS, with a restore test into a clean container.
+8. Rehearse the orchestrator move; turn NAS SSH off.
+9. Confirm no port forward, tunnel, CORS trust or NAS admin endpoint exposes the app, and check public cache behavior from outside the LAN. Document update, rollback, migration and restore in `ops/README.md`.
 
 **Exit:** household devices reach the app only through the intended LAN access policy, and unauthorized requests cannot read household data or mutate plans. The NAS publishes explicitly selected months outbound; a failed publish leaves the previous public version intact. A public visitor browses only approved read-only artifacts and can refresh to one coherent publication. Backup/restore, restart, migration, update/rollback by digest, image provenance, credential scope, cost assumptions and old-publication retention are documented and exercised.
 
@@ -527,4 +563,6 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Publish transport | Home app commits `publication/` + `app-ref` to `meal-plan` `main` over SSH (deploy key); the remote is authoritative and never force-pushed; identical content is a no-op; `live` only after the GitHub Actions run for the pushed commit succeeds; job records private in SQLite | phase 6b |
 | Publish credential | Deploy key with write access to `meal-plan` only; generated on the NAS, mounted as a file, never an env var | phase 6b / 6d |
 | NAS | UGREEN DXP2800 (N100, x86-64, 8 GB, UGOS Pro); Compose project in the UGOS Docker app; data under `/volume1/docker/meal-prep/` | phase 6d |
+| Release pipeline | Git tag on `main` = release; `scripts/release.sh` is the trust gate (CI green, digest of the commit, attestation verified) and writes the digest into the Compose file; Komodo (Core on the workstation, Periphery on the NAS) backs up, deploys the Stack and health-checks; rollback = redeploy the previous release. No deploy-on-push, no auto-update (Watchtower) and no GitHub runner on the NAS | phase 6d |
+| Orchestrator portability | Orchestrator setup is code under `ops/` (pinned Komodo Compose, resources as TOML via Resource Sync, `bootstrap.sh`); secrets in a password-manager recovery kit; `release.sh --direct` works without Komodo; the move is rehearsed once | phase 6d |
 | Costs | Verify NAS, power, storage, GitHub plan, domain, transfer, and tooling at launch | before phase 6 |
