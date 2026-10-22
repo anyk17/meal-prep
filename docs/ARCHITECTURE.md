@@ -1,87 +1,88 @@
 # Architecture
 
-The planner (`planner/mealplanner/`) is a layered, ports-and-adapters design. Dependencies point inward; the rule is enforced by `planner/tests/test_architecture.py`.
+Meal Prep plans the household's week, says what to buy, and publishes a read-only copy for phones away from home.
 
-## Layers and dependency rule
-
-| Layer | Purpose | May import |
-|---|---|---|
-| `domain/` | Pure business model: catalog, variants, input policies, weekly plan rules (`weekly_rules.py`), plan snapshot, WeeklyPlan records. stdlib + pydantic only; no I/O, Flask, sqlite3, yaml, ortools, file paths. | `domain` |
-| `application/` | Use cases and ports (incl. `PlanGenerator`): generation, shopping list, plan output DTOs, read service, WeeklyPlan workflows. Never imports ortools or adapters. | `domain` |
-| `adapters/` | Implementations of the ports: YAML inputs, JSON snapshot, in-memory, SQLite, output files, and the OR-Tools generator (`adapters/ortools/`, the only place that imports ortools). | `domain`, `application` (ports, errors, DTOs) |
-| `entrypoints/` | CLIs and the Flask app; compose adapters into services. | anything |
+## The system at a glance
 
 ```mermaid
 flowchart LR
-  subgraph entrypoints
-    CLI[cli.py]
-    DBCLI[db_cli.py]
-    HTTP[http/app.py<br/>read_routes, write_routes]
+  subgraph home["Home network"]
+    B[Browser] -->|HTTP :8080| APP
+    subgraph NAS["NAS · one container"]
+      APP[Flask API + React app] --> DB[(SQLite /data)]
+    end
   end
-  subgraph adapters
-    YAML[yaml_inputs]
-    JSON[json_snapshot]
-    MEM[memory]
-    SQL[sqlite/store, migrations]
-    FILES[files]
-    PUB[publication_files]
-    ORT[ortools<br/>OrToolsPlanGenerator]
+  APP -->|git push, deploy key| MP[meal-plan repo]
+  MP -->|Actions build| SITE[Public site<br/>jflopezo91.github.io/meal-plan]
+  PHONE[Phone, anywhere] --> SITE
+  subgraph CD["Release (workstation)"]
+    REL[release.sh + Komodo]
   end
-  subgraph application
-    PORTS{{ports.py<br/>PlannerInputReader<br/>PlanReadRepository<br/>PlanWorkflowRepository<br/>PlanGenerator<br/>ShoppingTripRepository<br/>PublicationWriter}}
-    SVC[generation, shopping, plan_output<br/>plan_reads, plan_workflows<br/>shopping_trips, publication]
-  end
-  DOMAIN[domain]
-  CLI --> SVC
-  DBCLI --> SQL
-  HTTP --> SVC
-  entrypoints -.wires.-> adapters
-  YAML -. implements .-> PORTS
-  JSON -. implements .-> PORTS
-  MEM -. implements .-> PORTS
-  SQL -. implements .-> PORTS
-  ORT -. implements .-> PORTS
-  PUB -. implements .-> PORTS
-  SVC --> PORTS
-  SVC --> DOMAIN
-  adapters --> DOMAIN
+  GH[meal-prep repo] -->|Actions: test, build, attest| GHCR[(GHCR image)]
+  REL -->|deploy by digest| NAS
+  GHCR -->|pull| NAS
 ```
 
-## Where key concepts live
+- **Home app**: one container on the NAS. It plans, edits and publishes. Viewing is open on the home network; changes need a login.
+- **Public site**: static files built from what the home app publishes. Read-only; nothing on GitHub can call the NAS.
+- **Release**: GitHub builds and signs the image; a workstation decides when the NAS runs it (see phase 6d in the [plan](migration-to-cloud/README.md)).
 
-- **WeeklyPlan lifecycle**: records, errors, diff and linked-pair helpers in `domain/weekly_plan.py`; create / propose / accept / discard / undo / `fill_month` in `application/plan_workflows.py` (month helpers and the deterministic `week_seed` in `domain/month.py`; a month fill is a batch of independent weekly plans); persistence port `PlanWorkflowRepository`, implemented by `adapters/sqlite/store.py` and `adapters/memory.py`.
-- **Meal swaps** (phase 5): pure logic in `domain/swap.py` (`apply_swap` replaces a slot, and its linked partner for scope `pair`, using the shared `materialize_variant` in `domain/variants.py` that generation output also uses; it recomputes derived counts and groceries from the base revision's captured pantry; also `grocery_delta`, `extra_needed`, and swap provenance via `generation_baseline`/`swapped_assignment_ids`). Use cases `list_swap_variants`, `preview_swap` (stateless), `swap` (idempotent, appends one revision with source `swap`) live on `PlanWorkflowService`, which reads the `ShoppingTripRepository` port only to report trip impact. Weekly rules are advisory there: `check_weekly_rules` violations come back as warnings, and undo no longer refuses a rule-breaking restore. `Proposal.replaced_swaps` counts swapped slots a regeneration would replace. Routes: `write_routes.py` (`/plans/{id}/swaps[/preview]`) and `read_routes.py` (`/catalog/variants`).
-- **ShoppingTrip** (phase 4; “shopping list” in the UI): aggregate in `domain/shopping_trip.py` (`version`; per-week `cells`, one per (week, shelf-life group), each `to_buy` or `bought` and freezing the revision and snapshot it was bought at; `status` open/done and `completed_at` derived from the cells; one-trip-per-(week, shelf-life group) invariant; mark/unmark purchases, with done/reopen as shortcuts; item summation with `quantity_by_plan` for the to-buy and the bought cells; per-group cell coverage `not_covered | to_buy | bought` as pure functions); use cases in `application/shopping_trips.py`; persistence port `ShoppingTripRepository`, implemented by `adapters/sqlite/store.py` and `adapters/memory.py`. It reads plans through the existing plan ports and never writes them. Ingredient shelf life (`long_lasting | fresh`, `ShelfLife` in `domain/catalog.py`) is an input label read at view time through a `labels` callable injected into the service; it is never stored in plan snapshots. Named `ShoppingTrip` in code to avoid clashing with the weekly `ShoppingList` DTO.
-- **Publication export** (phase 4 minimal, hardened in phase 6): `application/publication.py` selects months, reads current plans, groceries and trips, builds and validates the bundle model; the `PublicationWriter` port writes it, implemented by `adapters/publication_files.py` (new immutable `publications/<id>/` directory, then `index.json` replaced last). Entry point: `db_cli export`.
-- **PlanSnapshot**: `domain/snapshot.py` holds the immutable plan + shopping payload, `canonical_snapshot_id`, `validate_snapshot`, and `normalize_snapshot` (legacy weekday JSON to dated snapshot).
-- **Weekly plan rules**: one specification per rule in `domain/weekly_rules.py` (`check_weekly_rules(plan, inputs)` on the dated snapshot; the module docstring maps each rule to its CP-SAT constraint). `PlanWorkflowService` enforces them on every generated candidate (create, month fill, proposal, accept) and `db_cli` on fixture import; failures raise `RuleViolationError` (HTTP 422 `rule_violation`). Manual swaps and undo only report violations as warnings (phase 5: the household decides). Input validation stays in `domain/policies.py`.
-- **Plan generation**: the `PlanGenerator` port in `application/ports.py`; the OR-Tools encoding of the rules (`model.py`, `solve.py`) and `OrToolsPlanGenerator` live in `adapters/ortools/`. Entrypoints inject the generator (`create_app(generator=...)`, CLI); the engine only proposes, the domain rules decide.
-- **Planner inputs**: `domain/planner_inputs.py` (value object); read through the `PlannerInputReader` port by `adapters/yaml_inputs.py` or `adapters/sqlite/store.py`.
-- **Read / write HTTP**: `entrypoints/http/read_routes.py` and `write_routes.py` only parse, map errors and serialize; rules live in `application/plan_reads.py` and `plan_workflows.py`. `app.py` is the factory (`create_app`) and dev server (`python -m mealplanner.entrypoints.http.app`).
-- **Container wiring** (phase 6a): `entrypoints/http/ops_routes.py` (`/healthz`, and same-origin serving of the built frontend when `MEALPLANNER_STATIC_DIR` is set); access control is the household login below; `Dockerfile`, `deploy/entrypoint.sh` (create-or-migrate, then gunicorn) and `deploy/docker-compose*.yml` at the repository level.
-- **Publishing** (phase 6b): `application/publishing.py` (`PublishingService`: validate months, sync, build via `PublicationService`, skip when the content hash matches the published one, write, commit and push, record a job; refreshes a `pushed` job from the deployment status). Ports in `application/ports.py`: `PublicationRepository` (git working copy of the public repo, `adapters/git_publication.py`, subprocess git over SSH, remote authoritative, never force-pushed), `DeploymentStatusReader` (`adapters/github_deployments.py`, unauthenticated GitHub REST), `PublishJobRepository` (`adapters/sqlite/publication_jobs.py`, table `publication_jobs`). Routes: `entrypoints/http/publish_routes.py`; wiring and `MEALPLANNER_PUBLISH_*` settings in `entrypoints/http/app.py`.
-- **Household login** (phase 6c): `domain/auth.py` (`User`, `SessionRecord`, username normalization, auth errors), `application/auth.py` (`AuthService`: scrypt `PasswordHasher`, sessions with idle/absolute expiry, `LoginRateLimiter`, user management; ports `UserRepository`/`SessionRepository` in `application/ports.py`), `adapters/sqlite/auth.py` (tables `users`, `sessions`, migration 5) with in-memory twins in `adapters/memory.py`, and `entrypoints/http/auth_routes.py` (`/api/v1/session`, the `before_request` guard, the `Sec-Fetch-Site`/`Origin` check). User management is `db_cli user ...`.
-- **CLIs**: `python -m mealplanner.entrypoints.cli` (also the `mealplanner` script) and `python -m mealplanner.entrypoints.db_cli` (import, backup, restore, export, migrate, user).
+## Core ideas
+
+| Idea | In one sentence | Lives in |
+|---|---|---|
+| **Weekly plan** | A week's meals and groceries, saved as append-only revisions; generated by a solver, judged by rules. | `domain/weekly_plan.py`, `weekly_rules.py`, `snapshot.py` · `application/plan_workflows.py` |
+| **Rules vs solver** | Rules are plain specifications in the domain; the OR-Tools solver only proposes plans and sits behind a port. A month is just several independent weeks. | `domain/weekly_rules.py` · `adapters/ortools/` |
+| **Swap** | Replace one meal (or a linked pair) by hand; rules only warn. | `domain/swap.py` |
+| **Shopping list** | A set of weeks; each week has a Long-lasting and a Fresh cell that is *To buy* or *Bought*. Bought cells freeze what was bought; the list is done when everything is bought. | `domain/shopping_trip.py` · `application/shopping_trips.py` |
+| **Shelf life** | Each ingredient is long-lasting or fresh; read live from the inputs, never stored in plans. | `domain/catalog.py` |
+| **Publish** | Copy chosen months and lists to the public repo as one commit, tagged with the code version that renders them. | `application/publication.py`, `publishing.py` |
+| **Login** | Household users, server-side sessions; one guard checks every change. | `domain/auth.py` · `application/auth.py` · `entrypoints/http/auth_routes.py` |
+
+## Backend layers
+
+Ports and adapters, dependencies point inward (enforced by `planner/tests/test_architecture.py`):
+
+```
+entrypoints  →  application  →  domain
+     ↘ wires        ↑ ports
+       adapters ────┘   (SQLite, YAML, files, git, GitHub, OR-Tools)
+```
+
+| Layer | Holds | Rule |
+|---|---|---|
+| `domain/` | Business model and rules | Pure: no I/O, no frameworks |
+| `application/` | Use cases and ports (interfaces) | Uses the domain; never an adapter |
+| `adapters/` | Storage, files, git, solver | Implements ports |
+| `entrypoints/` | HTTP routes, CLIs, wiring | Parses, delegates, serializes |
+
+## Frontend
+
+React + Vite in `site/`, one codebase, two modes:
+
+- **API mode** (home app): reads and writes through `/api/v1`; editing code (`site/src/editing/`) loads only for logged-in users.
+- **Static mode** (public site): reads a published bundle; no editing.
+
+Readers (`site/src/readers/`) give both modes the same data shapes, so views do not care where data came from. Pure logic sits in `*Model.js` files and is unit-tested; components stay thin.
+
+## Trust in five lines
+
+1. **One secret:** the publish deploy key, a file on the NAS with write access to `meal-plan` only.
+2. **Images by digest:** the NAS runs exactly the image GitHub built and attested for a release.
+3. **Server decides:** the session check on the server is the boundary, not hidden buttons.
+4. **Outbound only:** the NAS pushes to GitHub; nothing calls in. No port forwarding.
+5. **State outside the image:** SQLite in `/data`, backed up before every release.
 
 ## Where do I put new code?
 
 | New code | Goes in |
 |---|---|
-| A weekly plan business rule | `domain/weekly_rules.py` (one specification); its CP-SAT encoding in `adapters/ortools/` (keep them in sync; `test_weekly_rules.py` checks the generator against the specs) |
-| A shopping-trip rule (coverage, membership, status) | `domain/shopping_trip.py` |
-| A validation rule on recipes, ingredients or inputs | `domain/policies.py` |
-| A new plan record, value object or domain error | `domain/` |
-| A new use case or orchestration step | `application/` |
-| A new storage or input boundary | Protocol in `application/ports.py`, implementation in `adapters/` |
-| SQL, YAML, file or network access | `adapters/` |
-| A new HTTP route or CLI command | `entrypoints/` (delegate to an application service) |
-| Wiring adapters to services | `entrypoints/` |
+| A weekly plan rule | `domain/weekly_rules.py` + its solver encoding in `adapters/ortools/` (tests keep them in sync) |
+| A shopping-list rule | `domain/shopping_trip.py` |
+| An input validation rule | `domain/policies.py` |
+| A use case | `application/` |
+| Storage, file or network access | port in `application/ports.py`, implementation in `adapters/` |
+| An HTTP route or CLI command | `entrypoints/` (delegate to a service) |
+| Frontend logic | a `*Model.js` file (pure, tested); UI in `components/` or `editing/` |
 
-## Deployment and trust boundaries (phase 6)
-
-- **One image, state outside it.** The container holds code and the API-mode frontend; SQLite lives in the `/data` volume. Entry points (gunicorn, `db_cli`) wire adapters exactly as in development.
-- **Images are trusted by digest and provenance.** GitHub Actions builds and attests the image; the NAS runs `image@sha256:…` and an update starts with `gh attestation verify`. A moved tag cannot change what runs.
-- **The only secret is the publish deploy key.** Write access to `jflopezo91/meal-plan` only, read from `/run/secrets/deploy_key` by the publication push adapter; it never reaches the browser, an image, a repository or an environment variable. Worst case if leaked: wrong public meal data, never code changes.
-- **A publish is one commit.** The app writes `publication/` and `app-ref` (the meal-prep commit that renders the data, from `MEALPLANNER_APP_REVISION`) into a working copy of `meal-plan`, commits as `meal-prep publisher` and pushes `main` without force; ssh uses the mounted key with `IdentitiesOnly`, `BatchMode` and pinned host keys, and error messages shown to the API never contain key or working copy paths. A publish is `live` only after GitHub reports the run for that commit successful.
-- **Viewing is open, changes need a login.** Every `GET` works without a session (except `/api/v1/publishing`); every state-changing request needs the `mp_session` cookie, checked by one `before_request` guard in `entrypoints/http/auth_routes.py` before any route runs. Only the SHA-256 of the session token is stored, passwords are scrypt hashes, and state-changing requests from another site are rejected (`Sec-Fetch-Site`, `Origin`). There is no loopback or network-peer trust anywhere. The container port stays loopback-bound until the LAN HTTPS decision (6d); behind a proxy `MEALPLANNER_TRUSTED_PROXIES` makes the client address, scheme and host come from `X-Forwarded-*`.
-- **Publishing is outbound only.** The app pushes a validated bundle; the `meal-plan` workflow builds the static site from public `meal-prep` code at a pinned commit. Nothing on GitHub can call the NAS.
+Names: the UI says "shopping list", the code says `ShoppingTrip` (the weekly grocery DTO is `ShoppingList`).
