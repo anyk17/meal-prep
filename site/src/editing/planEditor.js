@@ -2,6 +2,7 @@
 // read-only reader interface and is only ever imported through a dynamic import that the static
 // (GitHub Pages) build removes.
 import { ReaderError, normalizeError, validatePair, validateTrip } from '../readers/shared.js';
+import { notifyIfUnauthenticated } from '../auth/authStore.js';
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -70,6 +71,7 @@ export function createPlanEditor(base = '/api/v1') {
       }
       // 503 means nothing was committed and a retry of the same action is expected.
       if (response.status !== 503) settle();
+      notifyIfUnauthenticated(response.status, error.code);
       const normalized = normalizeError(error.code, error.message, error.details);
       normalized.status = response.status;
       normalized.retryAfter = parseRetryAfter(response.headers?.get?.('Retry-After'));
@@ -89,7 +91,7 @@ export function createPlanEditor(base = '/api/v1') {
   return {
     async getCapabilities() {
       const result = await request('GET', '/capabilities');
-      return { canEditPlans: result?.can_edit_plans === true, canEditShoppingTrips: result?.can_edit_shopping_trips === true, canPublish: result?.can_publish === true };
+      return { canEditPlans: result?.can_edit_plans === true, canEditShoppingTrips: result?.can_edit_shopping_trips === true, canPublish: result?.can_publish === true, authenticated: result?.authenticated === true, username: typeof result?.username === 'string' ? result.username : null };
     },
     async createPlan(weekStart, seed) {
       if (typeof weekStart !== 'string' || !DATE_PATTERN.test(weekStart)) throw new ReaderError('invalid_request', 'A week start date is required.');

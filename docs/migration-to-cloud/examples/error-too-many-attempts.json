@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "too_many_attempts",
+    "message": "Too many failed attempts. Try again later.",
+    "details": []
+  }
+}

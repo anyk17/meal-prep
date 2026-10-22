@@ -5,11 +5,14 @@
     python -m mealplanner.entrypoints.db_cli restore --src var/backup.db --db var/mealplanner.db [--force]
     python -m mealplanner.entrypoints.db_cli migrate [--db var/mealplanner.db]
     python -m mealplanner.entrypoints.db_cli export --months 2026-10,2026-11 --out <dir> [--db var/mealplanner.db]
+    python -m mealplanner.entrypoints.db_cli user add|passwd|disable|enable|logout-all|remove <username> [--password-stdin]
+    python -m mealplanner.entrypoints.db_cli user list
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sqlite3
@@ -20,11 +23,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from ..adapters.publication_files import FilePublicationWriter
+from ..adapters.sqlite.auth import SqliteSessionRepository, SqliteUserRepository
 from ..adapters.sqlite.migrations import (
     LATEST_VERSION,
     DatabaseError,
     connect,
     current_version,
+)
+from ..adapters.sqlite.migrations import (
     migrate as apply_migrations,
 )
 from ..adapters.sqlite.store import (
@@ -36,9 +42,11 @@ from ..adapters.sqlite.store import (
     SqliteShoppingTripRepository,
     import_planner_inputs,
 )
+from ..adapters.yaml_inputs import YamlPlannerInputReader
+from ..application.auth import AuthService
 from ..application.publication import PublicationError, PublicationResult, PublicationService
 from ..application.shopping_trips import ShoppingTripService
-from ..adapters.yaml_inputs import YamlPlannerInputReader
+from ..domain.auth import AuthError
 from ..domain.snapshot import normalize_snapshot
 from ..domain.weekly_plan import (
     DuplicateWeek,
@@ -169,6 +177,55 @@ def migrate_database(db_path: Path | str) -> list[int]:
         return apply_migrations(conn)
 
 
+def auth_service(db_path: Path | str) -> AuthService:
+    """AuthService on an existing, migrated database (never creates one)."""
+    path = Path(db_path)
+    if not path.is_file():
+        raise DatabaseError(f"database not found: {path}")
+    return AuthService(SqliteUserRepository(path), SqliteSessionRepository(path), lambda: datetime.now(timezone.utc))
+
+
+def read_password(from_stdin: bool, *, prompt: bool = True) -> str:
+    """A password from stdin (one line, for scripted use) or a hidden prompt asked twice. Never from argv."""
+    if from_stdin:
+        line = sys.stdin.readline()
+        if not line:
+            raise ValueError("no password on stdin")
+        return line.rstrip("\r\n")
+    first = getpass.getpass("Password: ")
+    if getpass.getpass("Repeat password: ") != first:
+        raise ValueError("the passwords do not match")
+    return first
+
+
+def run_user_command(args: argparse.Namespace, db: Path) -> int:
+    service = auth_service(db)
+    name = getattr(args, "username", None)
+    if args.user_command == "list":
+        for user in service.list_users():
+            print(f"{user.username}\t{'disabled' if user.disabled else 'active'}\tcreated {user.created_at.isoformat()}")
+        return 0
+    if args.user_command == "add":
+        service.create_user(name, read_password(args.password_stdin))
+        print(f"user added: {name}")
+    elif args.user_command == "passwd":
+        service.set_password(name, read_password(args.password_stdin))
+        print(f"password changed and sessions ended: {name}")
+    elif args.user_command == "disable":
+        service.disable_user(name)
+        print(f"user disabled and sessions ended: {name}")
+    elif args.user_command == "enable":
+        service.enable_user(name)
+        print(f"user enabled: {name}")
+    elif args.user_command == "logout-all":
+        service.logout_all(name)
+        print(f"sessions ended: {name}")
+    else:
+        service.remove_user(name)
+        print(f"user removed: {name}")
+    return 0
+
+
 def full_bundle_validator() -> Callable[[Path], Sequence[str]]:
     """The repository's JSON-schema bundle validator (scripts/validate_publication_contract.py).
 
@@ -277,9 +334,28 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the JSON-schema bundle validator (coherence checks still run)",
     )
+    u = sub.add_parser("user", help="manage household login accounts")
+    usub = u.add_subparsers(dest="user_command", required=True)
+    for command, text in (
+        ("add", "create a user (asks for the password)"),
+        ("passwd", "change a password (ends the user's sessions)"),
+        ("disable", "block logins and end the user's sessions"),
+        ("enable", "allow a disabled user to log in again"),
+        ("logout-all", "end all of a user's sessions"),
+        ("remove", "delete a user and its sessions"),
+        ("list", "list users"),
+    ):
+        up = usub.add_parser(command, help=text)
+        up.add_argument("--db")
+        if command != "list":
+            up.add_argument("username")
+        if command in ("add", "passwd"):
+            up.add_argument("--password-stdin", action="store_true", help="read the password from one line of stdin")
     args = parser.parse_args(argv)
     try:
         db = resolve_db_path(args.db)
+        if args.command == "user":
+            return run_user_command(args, db)
         if args.command == "import":
             _print_report(import_inputs(db, args.data_dir, replace=args.replace_inputs))
             if args.fixture:
@@ -318,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         for detail in exc.errors:
             print(f"  {detail}", file=sys.stderr)
         return 1
-    except (DatabaseError, ValueError, OSError) as exc:
+    except (AuthError, DatabaseError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, DatabaseError) and "schema version" in str(exc):
             print("hint: run `python -m mealplanner.entrypoints.db_cli migrate` first", file=sys.stderr)

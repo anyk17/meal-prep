@@ -21,11 +21,12 @@ from mealplanner.domain.weekly_rules import check_weekly_rules
 from mealplanner.entrypoints.db_cli import import_inputs
 from mealplanner.entrypoints.http.app import create_app
 
+from auth_helpers import logged_in_client
+
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = yaml.safe_load((ROOT / "docs/migration-to-cloud/openapi.yaml").read_text())
 INPUTS: PlannerInputs = YamlPlannerInputReader(ROOT / "data").read()
 NOW = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)  # Wednesday in Bogota
-LAN = {"REMOTE_ADDR": "192.168.1.20"}
 
 _cache: dict[int, MealPlanSolution] = {}
 
@@ -313,7 +314,7 @@ def app(tmp_path, stub):
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    return logged_in_client(app)
 
 
 def test_http_fill_ok_and_schema(client) -> None:
@@ -349,10 +350,10 @@ def test_http_bad_month_and_bad_body(client) -> None:
     fail(client.post("/api/v1/months/2026-10/fill", data="x", content_type="text/plain"), 400, "invalid_request")
 
 
-def test_http_forbidden_and_read_only(client) -> None:
-    fail(client.post("/api/v1/months/2026-10/fill", json={}, environ_base=LAN), 403, "forbidden")
+def test_http_needs_login_and_read_only(app, client) -> None:
+    fail(app.test_client().post("/api/v1/months/2026-10/fill", json={}), 401, "unauthenticated")
     assert client.get("/api/v1/plans?from=2026-10-01&to=2026-12-31").get_json()["items"] == []
-    json_client = create_app(week_start="2026-10-19").test_client()
+    json_client = logged_in_client(create_app(week_start="2026-10-19"))
     fail(json_client.post("/api/v1/months/2026-10/fill", json={}), 403, "read_only")
 
 

@@ -204,21 +204,15 @@ def serialize_month_fill(r: MonthFillResult) -> dict[str, Any]:
 def register_write_routes(
     app: Any,
     error: Callable[..., Any],
-    is_loopback: Callable[[], bool],
     gate: GenerationGate,
 ) -> None:
-    from flask import jsonify, request
+    from flask import g, jsonify, request
 
     def service() -> PlanWorkflowService | None:
         return app.config.get("PLAN_WORKFLOW_SERVICE")
 
-    def can_edit() -> bool:
-        return service() is not None and is_loopback()
-
     def guard():
-        """Server-side authorization boundary for every mutation."""
-        if not is_loopback():
-            return error(403, "forbidden", "Plan changes are allowed from this machine only.")
+        """Mutations need the SQLite-backed API; the login check itself is app.py's before_request guard."""
         if service() is None:
             if app.config.get("PLAN_WRITE_FAILURE"):
                 return error(503, "source_unavailable", "The plan database is unavailable.")
@@ -314,10 +308,20 @@ def register_write_routes(
 
     @app.get("/api/v1/capabilities")
     def capabilities():
-        editable = can_edit()
-        can_publish = app.config.get("PUBLISHING_SERVICE") is not None and is_loopback()
+        auth = getattr(g, "auth", None)
+        if auth is None:
+            return jsonify(
+                {"authenticated": False, "can_edit_plans": False, "can_edit_shopping_trips": False, "can_publish": False}
+            )
+        editable = service() is not None
         return jsonify(
-            {"can_edit_plans": editable, "can_edit_shopping_trips": editable, "can_publish": can_publish}
+            {
+                "authenticated": True,
+                "username": auth.username,
+                "can_edit_plans": editable,
+                "can_edit_shopping_trips": editable,
+                "can_publish": app.config.get("PUBLISHING_SERVICE") is not None,
+            }
         )
 
     @app.post("/api/v1/plans")

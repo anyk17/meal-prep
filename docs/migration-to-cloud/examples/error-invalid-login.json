@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The login request is invalid.",
+    "details": [
+      {
+        "field": "password",
+        "message": "password must be a non-empty string"
+      }
+    ]
+  }
+}

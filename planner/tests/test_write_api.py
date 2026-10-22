@@ -11,6 +11,8 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
 from mealplanner.entrypoints.http.app import create_app
+
+from auth_helpers import logged_in_client
 from mealplanner.entrypoints.db_cli import import_inputs
 from mealplanner.adapters.ortools import OrToolsPlanGenerator
 from mealplanner.domain.solution import MealPlanSolution
@@ -22,7 +24,6 @@ NOW = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)  # Wednesday in Bogota
 FUTURE = "2026-10-26"
 FUTURE_ID = "plan_2026_10_26"
 KEY = {"Idempotency-Key": "key-1"}
-LAN = {"REMOTE_ADDR": "192.168.1.20"}
 
 _cache: dict[int, MealPlanSolution] = {}
 
@@ -96,7 +97,7 @@ def app(db_path, clock):
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    return logged_in_client(app)
 
 
 def make_plan(client, seed: int = 1) -> dict:
@@ -301,31 +302,47 @@ def test_bad_ids_rejected(client) -> None:
 
 
 def test_capabilities(client, tmp_path) -> None:
-    assert ok(client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": True, "can_edit_shopping_trips": True, "can_publish": False}
-    json_app = create_app(week_start="2026-10-19")
-    json_client = json_app.test_client()
-    assert ok(json_client.get("/api/v1/capabilities"), 200, "Capabilities") == {"can_edit_plans": False, "can_edit_shopping_trips": False, "can_publish": False}
+    assert ok(client.get("/api/v1/capabilities"), 200, "Capabilities") == {
+        "authenticated": True, "username": "tester",
+        "can_edit_plans": True, "can_edit_shopping_trips": True, "can_publish": False,
+    }
+    json_client = logged_in_client(create_app(week_start="2026-10-19"))
+    assert ok(json_client.get("/api/v1/capabilities"), 200, "Capabilities") == {
+        "authenticated": True, "username": "tester",
+        "can_edit_plans": False, "can_edit_shopping_trips": False, "can_publish": False,
+    }
+
+
+def test_capabilities_without_a_session(app) -> None:
+    anonymous = app.test_client()
+    assert ok(anonymous.get("/api/v1/capabilities"), 200, "Capabilities") == {
+        "authenticated": False,
+        "can_edit_plans": False, "can_edit_shopping_trips": False, "can_publish": False,
+    }
 
 
 def test_json_mode_is_read_only(tmp_path) -> None:
-    client = create_app(week_start="2026-10-19").test_client()
+    client = logged_in_client(create_app(week_start="2026-10-19"))
     fail(client.post("/api/v1/plans", json={"week_start": FUTURE}), 403, "read_only")
     fail(client.get("/api/v1/plans/plan_2026_10_19/revisions"), 403, "read_only")
     fail(client.delete("/api/v1/plans/plan_2026_10_19/proposals/prop_x"), 403, "read_only")
     assert client.get("/api/v1/plans/plan_2026_10_19").status_code == 200
 
 
-def test_non_loopback_mutations_forbidden(client) -> None:
+def test_mutations_need_a_session(app, client) -> None:
     make_plan(client)
     proposal = propose(client)
+    anonymous = app.test_client()
     for response in (
-        client.post("/api/v1/plans", json={"week_start": "2026-11-02"}, environ_base=LAN),
-        client.post(f"/api/v1/plans/{FUTURE_ID}/proposals", json={"expected_revision": 1}, environ_base=LAN),
-        client.delete(f"/api/v1/plans/{FUTURE_ID}/proposals/{proposal['proposal_id']}", environ_base=LAN),
-        client.post(accept_url(proposal), json={"expected_revision": 1}, headers=KEY, environ_base=LAN),
-        client.post(f"/api/v1/plans/{FUTURE_ID}/undo", json={"expected_revision": 1}, headers=KEY, environ_base=LAN),
+        anonymous.post("/api/v1/plans", json={"week_start": "2026-11-02"}),
+        anonymous.post(f"/api/v1/plans/{FUTURE_ID}/proposals", json={"expected_revision": 1}),
+        anonymous.delete(f"/api/v1/plans/{FUTURE_ID}/proposals/{proposal['proposal_id']}"),
+        anonymous.post(accept_url(proposal), json={"expected_revision": 1}, headers=KEY),
+        anonymous.post(f"/api/v1/plans/{FUTURE_ID}/undo", json={"expected_revision": 1}, headers=KEY),
     ):
-        fail(response, 403, "forbidden")
+        fail(response, 401, "unauthenticated")
+    # viewing stays open
+    assert anonymous.get(f"/api/v1/plans/{FUTURE_ID}").status_code == 200
     current = ok(client.get(f"/api/v1/plans/{FUTURE_ID}"), 200, "Plan")
     assert current["revision"] == 1  # nothing happened
 
@@ -352,7 +369,7 @@ def test_generation_failure_maps_and_releases_gate(db_path, clock) -> None:
         def generate(self, inputs, seed):
             raise RuntimeError("infeasible")
 
-    client = create_app(db_path=db_path, clock=clock, generator=Broken()).test_client()
+    client = logged_in_client(create_app(db_path=db_path, clock=clock, generator=Broken()))
     for _ in range(2):  # a second attempt proves the gate was released
         fail(client.post("/api/v1/plans", json={"week_start": FUTURE}), 422, "generation_failed")
 
@@ -366,7 +383,7 @@ def test_solver_time_limit_is_wired(db_path, clock, monkeypatch) -> None:
 
     monkeypatch.setattr("mealplanner.adapters.ortools.OrToolsPlanGenerator", Spy)
     monkeypatch.setenv("MEALPLANNER_SOLVER_TIMEOUT_SECONDS", "12")
-    client = create_app(db_path=db_path, clock=clock).test_client()
+    client = logged_in_client(create_app(db_path=db_path, clock=clock))
     make_plan(client)
     assert seen["limit"] == 12.0
 
@@ -384,7 +401,7 @@ def test_rule_violating_result_maps_to_rule_violation_and_stores_nothing(db_path
             )
             return MealPlanSolution(assignments=assignments)
 
-    client = create_app(db_path=db_path, clock=clock, generator=Violating()).test_client()
+    client = logged_in_client(create_app(db_path=db_path, clock=clock, generator=Violating()))
     response = client.post("/api/v1/plans", json={"week_start": FUTURE})
     error = fail(response, 422, "rule_violation")
     assert error["details"], error
@@ -396,7 +413,7 @@ def test_rule_violating_result_maps_to_rule_violation_and_stores_nothing(db_path
 
 
 def test_end_to_end_real_solver(db_path) -> None:
-    client = create_app(db_path=db_path, solver_timeout_seconds=60).test_client()
+    client = logged_in_client(create_app(db_path=db_path, solver_timeout_seconds=60))
     monday = date.today() + timedelta(days=(7 - date.today().weekday()))
     week = monday.isoformat()
     plan = ok(client.post("/api/v1/plans", json={"week_start": week}), 201, "Plan")

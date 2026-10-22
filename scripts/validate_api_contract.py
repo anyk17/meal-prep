@@ -45,6 +45,7 @@ EXPECTED_PATHS = {
     "/api/v1/plans/{plan_id}/swaps/preview": {"post"},
     "/api/v1/catalog/variants": {"get"},
     "/api/v1/capabilities": {"get"},
+    "/api/v1/session": {"get", "post", "delete"},
     "/api/v1/months/{month}/fill": {"post"},
     "/api/v1/shopping-trips": {"get", "post"},
     "/api/v1/shopping-trips/{trip_id}": {"get", "delete"},

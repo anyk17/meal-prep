@@ -1,7 +1,7 @@
-"""Loopback-only Flask app factory and dev server entry point.
+"""Flask app factory and dev server entry point.
 
 Wires adapters (JSON snapshot or SQLite) to the application services and
-registers the read and write route modules.
+registers the route modules. Viewing is open; changes and publishing need a household login.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import re
 import sqlite3
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,6 +19,7 @@ from ...adapters.json_snapshot import JsonPlanReadRepository, SourceUnavailableE
 from ...application.plan_reads import PlanReadService
 from ...application.ports import PlanGenerator, PlanReadRepository
 from ...domain.snapshot import SourceInvalidError
+from .auth_routes import register_auth
 from .ops_routes import register_health_route, register_static_routes
 from .publish_routes import register_publish_routes
 from .read_routes import register_read_routes
@@ -74,15 +74,6 @@ def _env_number(name: str, default: float, cast: Callable[[str], Any]) -> Any:
     return value
 
 
-def _is_loopback_request() -> bool:
-    from flask import request
-
-    try:
-        return ip_address(request.remote_addr or "").is_loopback
-    except ValueError:
-        return False
-
-
 def _build_workflow_service(
     db_path: Path | str,
     timezone: str | None,
@@ -91,12 +82,12 @@ def _build_workflow_service(
     solver_timeout_seconds: float | None,
     proposal_ttl: timedelta | None,
 ) -> Any:
+    from ...adapters.ortools import OrToolsPlanGenerator
     from ...adapters.sqlite.store import (
         SqlitePlannerInputReader,
         SqlitePlanRepository,
         SqliteShoppingTripRepository,
     )
-    from ...adapters.ortools import OrToolsPlanGenerator
     from ...application.plan_workflows import DEFAULT_PROPOSAL_TTL, PlanWorkflowService
 
     zone = timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota")
@@ -127,6 +118,38 @@ def _build_trip_service(
         SqliteShoppingTripRepository(db_path),
         SqlitePlanRepository(db_path),
         clock or (lambda: datetime.now(tz)),
+    )
+
+
+def _env_number_or_zero(name: str) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _build_auth_service(db_path: Path | str, timezone: str | None, clock: Callable[[], datetime] | None) -> Any:
+    from ...adapters.sqlite.auth import SqliteSessionRepository, SqliteUserRepository
+    from ...application.auth import AuthService
+
+    tz = ZoneInfo(timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota"))
+    return AuthService(
+        SqliteUserRepository(db_path), SqliteSessionRepository(db_path), clock or (lambda: datetime.now(tz))
+    )
+
+
+def _memory_auth_service(clock: Callable[[], datetime] | None) -> Any:
+    from ...adapters.memory import InMemorySessionRepository, InMemoryUserRepository
+    from ...application.auth import AuthService
+
+    return AuthService(
+        InMemoryUserRepository(), InMemorySessionRepository(), clock or (lambda: datetime.now(ZoneInfo("UTC")))
     )
 
 
@@ -224,27 +247,33 @@ def create_app(
     max_concurrent_generations: int | None = None,
     proposal_ttl: timedelta | None = None,
     static_dir: Path | str | None = None,
-    trust_network_peers: bool | None = None,
     publishing_service: Any = None,
+    auth_service: Any = None,
+    trusted_proxies: int | None = None,
+    cookie_secure: bool | None = None,
 ) -> Any:
     """Create the API. Source files are loaded and validated once.
 
     With db_path (or MEALPLANNER_DB) reads come from the SQLite store and the
-    plan write routes are enabled (loopback clients only). Otherwise the API is
-    read-only. clock must return a timezone-aware datetime (tests inject one);
-    the default reads the household timezone (MEALPLANNER_TIMEZONE).
+    plan write routes are enabled. Otherwise the API is read-only. clock must return a
+    timezone-aware datetime (tests inject one); the default reads the household timezone
+    (MEALPLANNER_TIMEZONE).
 
     static_dir (or MEALPLANNER_STATIC_DIR) also serves the built frontend from the same origin.
-    trust_network_peers (or MEALPLANNER_TRUST_NETWORK_PEERS=1) treats every TCP peer as local;
-    it exists for the container, where the published port (bound to loopback by Compose) is the
-    only access control. Remove it when household login (phase 6c) lands.
+
+    Household login (phase 6c): GET requests are open, every state-changing request and all of
+    /api/v1/publishing need the mp_session cookie. Users live in SQLite (db_cli user ...);
+    auth_service injects an AuthService (tests; without a database the default has no users).
+    The cookie is Secure unless MEALPLANNER_COOKIE_SECURE=0 (cookie_secure). trusted_proxies
+    (MEALPLANNER_TRUSTED_PROXIES=<n>, default 0) trusts n reverse-proxy hops for the client address,
+    scheme and host (ProxyFix).
 
     Publishing (phase 6b) is configured by MEALPLANNER_PUBLISH_REPO (unset = disabled) and the other
     MEALPLANNER_PUBLISH_* / MEALPLANNER_PUBLIC_SITE_URL / MEALPLANNER_APP_REVISION settings;
     publishing_service injects a PublishingService instead (tests).
     """
     try:
-        from flask import Flask, jsonify, request
+        from flask import Flask, request
     except ModuleNotFoundError as exc:
         if exc.name == "flask":
             raise RuntimeError(
@@ -261,6 +290,12 @@ def create_app(
     app.config["PUBLISHING_SERVICE"] = publishing_service
     app.config["PUBLIC_SITE_URL"] = os.environ.get("MEALPLANNER_PUBLIC_SITE_URL") or DEFAULT_PUBLIC_SITE_URL
     sqlite_path = db_path or os.environ.get("MEALPLANNER_DB")
+    proxies = trusted_proxies if trusted_proxies is not None else int(_env_number_or_zero("MEALPLANNER_TRUSTED_PROXIES"))
+    if proxies > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies, x_host=proxies)  # type: ignore[method-assign]
+    app.config["AUTH_SERVICE"] = auth_service
     if repository is not None:
         app.config["PLAN_READ_SERVICE"] = PlanReadService(repository)
     elif sqlite_path:
@@ -278,6 +313,8 @@ def create_app(
                 app.config["PUBLISHING_SERVICE"] = _build_publishing_service(
                     sqlite_path, timezone, clock, app.config["SHOPPING_TRIP_SERVICE"]
                 )
+            if auth_service is None:
+                app.config["AUTH_SERVICE"] = _build_auth_service(sqlite_path, timezone, clock)
         except DatabaseError:
             app.config["PLAN_SOURCE_FAILURE"] = "source_unavailable"
         except (sqlite3.Error, ValueError, KeyError):  # unreadable or corrupt file, bad timezone
@@ -305,34 +342,22 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    if trust_network_peers is None:
-        trust_network_peers = os.environ.get("MEALPLANNER_TRUST_NETWORK_PEERS") == "1"
-
-    def is_local_request() -> bool:
-        return trust_network_peers or _is_loopback_request()
-
-    @app.before_request
-    def reject_non_loopback_api_clients():
-        if not request.path.startswith("/api/"):
-            return None
-        if not is_local_request():
-            if request.method not in ("GET", "HEAD", "OPTIONS"):
-                return _error(403, "forbidden", "Plan changes are allowed from this machine only.")
-            return _error(
-                403, "invalid_request", "This development API accepts loopback connections only."
-            )
-        return None
+    if app.config["AUTH_SERVICE"] is None:
+        # No database (JSON snapshot mode) or an unusable one: nobody can log in, so changes stay refused.
+        app.config["AUTH_SERVICE"] = _memory_auth_service(clock)
+    secure = cookie_secure if cookie_secure is not None else os.environ.get("MEALPLANNER_COOKIE_SECURE") != "0"
+    register_auth(app, _error, cookie_secure=secure)
 
     limit = max_concurrent_generations or _env_number(
         "MEALPLANNER_MAX_CONCURRENT_GENERATIONS", DEFAULT_MAX_CONCURRENT_GENERATIONS, int
     )
     gate = GenerationGate(limit)
     app.config["GENERATION_GATE"] = gate
-    register_write_routes(app, _error, is_local_request, gate)
+    register_write_routes(app, _error, gate)
 
     register_read_routes(app, _error)
-    register_trip_routes(app, _error, is_local_request)
-    register_publish_routes(app, _error, is_local_request)
+    register_trip_routes(app, _error)
+    register_publish_routes(app, _error)
     register_health_route(app)
     static_root = static_dir or os.environ.get("MEALPLANNER_STATIC_DIR")
     if static_root:
@@ -342,10 +367,10 @@ def create_app(
 
 
 def main() -> None:
-    """Run the local development server, refusing non-loopback bindings."""
+    """Run the local development server, refusing non-loopback bindings (the container uses gunicorn)."""
     host = os.environ.get("MEALPLANNER_HOST", "127.0.0.1")
     if host != "127.0.0.1":
-        raise SystemExit("The unauthenticated phase 2 API may bind only to 127.0.0.1")
+        raise SystemExit("The development server may bind only to 127.0.0.1")
     port_text = os.environ.get("MEALPLANNER_PORT", "5000")
     try:
         port = int(port_text)

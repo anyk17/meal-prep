@@ -267,13 +267,12 @@ class FlaskApiTests(unittest.TestCase):
         ):
             api.main()
 
-    def test_api_rejects_non_loopback_remote_addresses(self) -> None:
+    def test_reads_are_open_to_any_address_without_a_session(self) -> None:
         response = self.client.get(
             "/api/v1/plans/plan_2026_10_19",
             environ_base={"REMOTE_ADDR": "192.168.1.20"},
         )
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.get_json()["error"]["code"], "invalid_request")
+        self.assertEqual(response.status_code, 200)
         self.assert_no_store(response)
 
     def test_extremely_large_revision_is_a_conflict_not_server_error(self) -> None:

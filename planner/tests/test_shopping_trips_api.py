@@ -15,10 +15,11 @@ from mealplanner.domain.solution import MealPlanSolution
 from mealplanner.entrypoints.db_cli import import_inputs
 from mealplanner.entrypoints.http.app import create_app
 
+from auth_helpers import logged_in_client
+
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = yaml.safe_load((ROOT / "docs/migration-to-cloud/openapi.yaml").read_text())
 NOW = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)
-LAN = {"REMOTE_ADDR": "192.168.1.20"}
 P1, P2, P3 = "plan_2026_10_26", "plan_2026_11_02", "plan_2026_11_09"
 BASE = "/api/v1/shopping-trips"
 
@@ -72,7 +73,7 @@ def db_path(tmp_path) -> Path:
 @pytest.fixture
 def client(db_path):
     app = create_app(db_path=db_path, clock=lambda: NOW, generator=CachedGenerator())
-    client = app.test_client()
+    client = logged_in_client(app)
     for week in ("2026-10-26", "2026-11-02", "2026-11-09"):
         ok(client.post("/api/v1/plans", json={"week_start": week, "seed": 1}), 201, "Plan")
     return client
@@ -184,23 +185,24 @@ def test_done_freezes_items_when_plan_changes(client) -> None:
     assert cov["coverage"] == "covered" and cov["changed_since_shopping"] is True
 
 
-def test_mutations_forbidden_off_loopback(client) -> None:
+def test_mutations_need_login(db_path, client) -> None:
+    anonymous = create_app(db_path=db_path, clock=lambda: NOW).test_client()
     trip = make_trip(client, [P1])
     url = f"{BASE}/{trip['trip_id']}"
     for response in (
-        client.post(BASE, json={"plan_ids": [P2]}, environ_base=LAN),
-        client.post(f"{url}/weeks", json={"plan_id": P2, "expected_version": 1}, environ_base=LAN),
-        client.delete(f"{url}/weeks/{P1}?expected_version=1", environ_base=LAN),
-        client.post(f"{url}/done", json={"expected_version": 1}, environ_base=LAN),
-        client.post(f"{url}/reopen", json={"expected_version": 1}, environ_base=LAN),
-        client.delete(f"{url}?expected_version=1", environ_base=LAN),
+        anonymous.post(BASE, json={"plan_ids": [P2]}),
+        anonymous.post(f"{url}/weeks", json={"plan_id": P2, "expected_version": 1}),
+        anonymous.delete(f"{url}/weeks/{P1}?expected_version=1"),
+        anonymous.post(f"{url}/done", json={"expected_version": 1}),
+        anonymous.post(f"{url}/reopen", json={"expected_version": 1}),
+        anonymous.delete(f"{url}?expected_version=1"),
     ):
-        fail(response, 403, "forbidden")
-    assert ok(client.get(url), 200, "ShoppingTrip") == trip
+        fail(response, 401, "unauthenticated")
+    assert ok(anonymous.get(url), 200, "ShoppingTrip") == trip
 
 
 def test_json_mode_is_read_only() -> None:
-    client = create_app(week_start="2026-10-19").test_client()
+    client = logged_in_client(create_app(week_start="2026-10-19"))
     assert ok(client.get(BASE), 200, "ShoppingTripList") == {"items": []}
     fail(client.get(f"{BASE}/trip_x"), 404, "trip_not_found")
     fail(client.post(BASE, json={"plan_ids": ["plan_2026_10_19"]}), 403, "read_only")

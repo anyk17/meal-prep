@@ -231,7 +231,9 @@ function mockFetch(handler) {
 
 test('capabilities report can_edit_shopping_trips independently', async () => {
   const mock = mockFetch(() => json({ can_edit_plans: true, can_edit_shopping_trips: true }));
-  try { assert.deepEqual(await createPlanEditor().getCapabilities(), { canEditPlans: true, canEditShoppingTrips: true, canPublish: false }); } finally { mock.restore(); }
+  try { assert.deepEqual(await createPlanEditor().getCapabilities(), { canEditPlans: true, canEditShoppingTrips: true, canPublish: false, authenticated: false, username: null }); } finally { mock.restore(); }
+  const authed = mockFetch(() => json({ can_edit_plans: true, authenticated: true, username: 'ana' }));
+  try { const caps = await createPlanEditor().getCapabilities(); assert.equal(caps.authenticated, true); assert.equal(caps.username, 'ana'); } finally { authed.restore(); }
 });
 
 test('trip writes send the documented requests with expected_version', async () => {

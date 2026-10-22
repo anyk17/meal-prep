@@ -45,16 +45,11 @@ def serialize_job(job: PublishJob | None) -> dict[str, Any] | None:
     }
 
 
-def register_publish_routes(app: Any, error: Callable[..., Any], is_local: Callable[[], bool]) -> None:
+def register_publish_routes(app: Any, error: Callable[..., Any]) -> None:
     from flask import jsonify, request
 
     def service() -> PublishingService | None:
         return app.config.get("PUBLISHING_SERVICE")
-
-    def guard():
-        if not is_local():
-            return error(403, "forbidden", "Publishing is allowed from this machine only.")
-        return None
 
     def disabled():
         return error(503, "publishing_disabled", DISABLED_MESSAGE)
@@ -103,9 +98,6 @@ def register_publish_routes(app: Any, error: Callable[..., Any], is_local: Calla
 
     @app.post("/api/v1/publishing/jobs")
     def publishing_start():
-        denied = guard()
-        if denied:
-            return denied
         svc = service()
         if svc is None:
             return disabled()

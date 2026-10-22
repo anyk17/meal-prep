@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore, lazy, Suspense } from 'react';
 import { MealCard } from './components/MealCard';
 import { ShoppingList } from './components/ShoppingList';
 import { RecipeModal } from './components/RecipeModal';
@@ -6,10 +6,11 @@ import { WeekGrid } from './components/WeekGrid';
 import { MonthView } from './components/MonthView';
 import { TripsView } from './components/TripsView';
 import { CoverageBadge, WeekCoverage } from './components/CoverageBadge';
-import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight, LogIn, LogOut } from 'lucide-react';
 import { createApiReader } from './readers/api';
 import { createStaticReader } from './readers/static';
 import { validatePair, addDays } from './readers/shared.js';
+import { authStore } from './auth/authStore.js';
 import { mondayOf, todayIn, formatWeekRange, formatMonth, monthOf } from './dates.js';
 
 const createReader = () => import.meta.env.VITE_READER_MODE === 'static'
@@ -25,6 +26,8 @@ const EditingPanel = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy
 const TripControls = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx'));
 const SwapDialog = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/SwapDialog.jsx'));
 const CreateTripBar = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/TripControls.jsx').then(module => ({ default: module.CreateTripBar })));
+const LoginDialog = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./auth/LoginDialog.jsx'));
+const loadSessionApi = import.meta.env.VITE_READER_MODE === 'static' ? null : () => import('./auth/sessionApi.js');
 const PublishView = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/PublishView.jsx'));
 const MonthFill = import.meta.env.VITE_READER_MODE === 'static' ? null : lazy(() => import('./editing/EditingPanel.jsx').then(module => ({ default: module.MonthFill })));
 
@@ -68,6 +71,9 @@ function App() {
   const [view, setView] = useState('week');
   const [month, setMonth] = useState(monthOf(INITIAL_WEEK));
   const [monthNonce, setMonthNonce] = useState(0);
+  const auth = useSyncExternalStore(authStore.subscribe, authStore.getState);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState(null);
   const requestGeneration = useRef(0);
   const hasPlan = useRef(false);
   const garbageCollector = getGarbageCollectorLabel();
@@ -133,10 +139,30 @@ function App() {
   // Ask the server whether this client may edit. Hiding controls is not authorization; the server enforces it.
   const refreshCapabilities = useCallback(async () => {
     if (!loadEditor) return;
-    try { const { createPlanEditor } = await loadEditor(); const caps = await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities(); setCanEdit(caps.canEditPlans); setCanEditTrips(caps.canEditShoppingTrips); setCanPublish(caps.canPublish); }
+    try { const { createPlanEditor } = await loadEditor(); const caps = await createPlanEditor(import.meta.env.VITE_API_BASE_PATH || '/api/v1').getCapabilities(); setCanEdit(caps.canEditPlans); setCanEditTrips(caps.canEditShoppingTrips); setCanPublish(caps.canPublish); authStore.dispatch({ type: 'capabilities', authenticated: caps.authenticated, username: caps.username }); }
     catch { setCanEdit(false); setCanEditTrips(false); setCanPublish(false); }
   }, []);
   useEffect(() => { void refreshCapabilities(); }, [refreshCapabilities]);
+
+  // Login, logout, or an expired session changes what the user may do: drop editing state and re-read capabilities and data.
+  const reloadToken = auth.reloadToken;
+  const seenReloadToken = useRef(reloadToken);
+  useEffect(() => {
+    if (seenReloadToken.current === reloadToken) return;
+    seenReloadToken.current = reloadToken;
+    void refreshCapabilities();
+    void loadData(true);
+    setReview(null); setSwapSlot(null); setSwapNotice(null); setSelectedPlans([]); setMonthNonce(value => value + 1);
+  }, [reloadToken, refreshCapabilities, loadData]);
+  const openLogin = () => authStore.dispatch({ type: 'open_login' });
+  const closeLogin = useCallback(() => authStore.dispatch({ type: 'close_login' }), []);
+  const logout = async () => {
+    if (loggingOut || !loadSessionApi) return;
+    setLoggingOut(true); setLogoutError(null);
+    try { const { createSessionApi } = await loadSessionApi(); await createSessionApi(import.meta.env.VITE_API_BASE_PATH || '/api/v1').logout(); authStore.dispatch({ type: 'logged_out' }); }
+    catch { setLogoutError('Could not log out. Check your connection and try again.'); }
+    finally { setLoggingOut(false); }
+  };
 
   const goToWeek = target => {
     if (target === weekStart) return;
@@ -224,13 +250,23 @@ function App() {
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{view === 'month' ? formatMonth(month) : actualRange}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <div className="text-xs text-slate-400 font-mono hidden sm:block">
               {publicationDate}{plan && <><br />Seed: {plan.seed}<br /><span className="text-[10px] opacity-75">r{plan.revision} · {formatLocalDateTime(plan.generated_at)}</span></>}
               <br />
               <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
             <button onClick={() => (view !== 'week' ? reloadMonth(true) : reload(true))} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            {LoginDialog && (auth.username ? (
+              <button onClick={logout} disabled={loggingOut} aria-label={`Log out (signed in as ${auth.username})`} title={`Signed in as ${auth.username}`}
+                className="min-h-11 min-w-11 px-2 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm disabled:opacity-60">
+                <LogOut size={18} /><span className="hidden sm:inline">{loggingOut ? 'Logging out…' : `Log out · ${auth.username}`}</span>
+              </button>
+            ) : (
+              <button onClick={openLogin} aria-label="Log in" className="min-h-11 min-w-11 px-2 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">
+                <LogIn size={18} /><span className="hidden sm:inline">Log in</span>
+              </button>
+            ))}
             <button
               onClick={toggleTheme}
               className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -242,6 +278,7 @@ function App() {
         </div>
       </header>
 
+      {logoutError && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">{logoutError}</div>}
       {error && (plan || view !== 'week') && <div role="alert" className="max-w-7xl mx-auto mt-4 px-4 py-3 bg-red-50 text-red-800 rounded-lg">Refresh failed: {error} {view === 'week' ? 'The displayed plan and groceries are still from the same snapshot.' : 'What is shown is from the last successful load.'}</div>}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -370,6 +407,11 @@ function App() {
           onClose={() => setSelectedSlot(null)}
           onSwap={canEdit && SwapDialog && !review && selectedSlot.date >= todayIn(plan?.timezone) ? () => { setSwapSlot(selectedSlot); setSelectedSlot(null); setSwapNotice(null); } : null}
         />
+      )}
+      {auth.loginOpen && LoginDialog && (
+        <Suspense fallback={null}>
+          <LoginDialog expired={auth.reason === 'expired'} onClose={closeLogin} onLoggedIn={username => authStore.dispatch({ type: 'logged_in', username })} />
+        </Suspense>
       )}
       {swapSlot && SwapDialog && plan && (
         <Suspense fallback={null}>

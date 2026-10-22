@@ -28,9 +28,10 @@ services:
       - no-new-privileges:true
     environment:
       MEALPLANNER_TIMEZONE: America/Bogota
-      MEALPLANNER_TRUST_NETWORK_PEERS: "1"  # the loopback-only port mapping is the access control
       MEALPLANNER_PUBLISH_REPO: git@github.com:jflopezo91/meal-plan.git
     ports:
+      # Household login exists (phase 6c), but its Secure session cookie needs HTTPS beyond localhost:
+      # keep the port on loopback until the LAN HTTPS decision (phase 6d), then open it to the LAN.
       - "127.0.0.1:8080:8080"
     volumes:
       - ../var/docker-data:/data

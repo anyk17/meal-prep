@@ -4,15 +4,17 @@ info:
   version: 0.1.0
   description: |-
     Versioned API for dated weekly meal plans and their current shopping snapshots.
-    Reads are always available. Plan changes (create, propose, accept, discard, undo, swap)
-    and revision history need a SQLite-backed server and a loopback client; the server
-    rejects them otherwise (403 forbidden or read_only). Static publication stays
-    read-only. This development API is intended to bind to loopback. It has no
-    authentication scheme and is not ready for remote deployment. Household-only
-    access protection is required before any remote exposure.
+    Viewing is open: every GET (plans, groceries, revisions, shopping lists, coverage, the
+    variant catalog, capabilities) works without a session, except the publishing area.
+    Changes need a household login: every POST, PUT, PATCH and DELETE except the session
+    resource itself, and every publishing endpoint, need the mp_session cookie that
+    POST /api/v1/session sets (401 unauthenticated otherwise). Plan and shopping changes also
+    need a SQLite-backed server (403 read_only otherwise). State-changing requests from another
+    site are refused (403 cross_origin_rejected, judged from Sec-Fetch-Site and Origin) and,
+    like every body the API reads, must be application/json. Static publication stays read-only.
 servers:
-  - url: http://127.0.0.1:5000
-    description: Local development server bound to loopback
+  - url: http://127.0.0.1:8080
+    description: Local container (the port is bound to loopback by Compose)
 security: []
 tags:
   - name: Plans
@@ -24,7 +26,9 @@ tags:
   - name: Shopping trips
     description: Shopping trips (called shopping lists in the UI) that cover weekly plans, and week coverage.
   - name: Publishing
-    description: Publish selected months to the public repository (loopback, SQLite-backed API with publishing configured).
+    description: Publish selected months to the public repository (login required, SQLite-backed API with publishing configured).
+  - name: Session
+    description: Household login. Viewing is open; changes and publishing need a session.
   - name: Capabilities
     description: What the calling client may do.
 paths:
@@ -87,7 +91,7 @@ paths:
       summary: Create revision 1 of the plan for a week
       description: |-
         Solves and stores a new plan for a current or future Monday-through-Sunday week
-        (one plan per week); seed defaults to the week's deterministic seed (int(YYYYMMDD of its Monday) mod 2**31), as in a month fill. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden. Solver runs are bounded: at most
+        (one plan per week); seed defaults to the week's deterministic seed (int(YYYYMMDD of its Monday) mod 2**31), as in a month fill. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only). Solver runs are bounded: at most
         MEALPLANNER_MAX_CONCURRENT_GENERATIONS run at once (others get 503 generation_busy,
         never queued) and each solve has a time limit (422 generation_failed). Every candidate is checked
         against the weekly rules (protein counts, adjacency, carbs, recipe limits, lunch/dinner
@@ -100,7 +104,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreatePlanRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '201':
           description: The new plan at revision 1.
           headers:
@@ -308,7 +316,7 @@ paths:
         The current revision is not changed. changes lists per-slot differences;
         identical is true when nothing would change. plan and shopping_list are the full
         candidate content that accept would commit as revision base_revision + 1. Only
-        future weeks may be regenerated. seed defaults to a fresh random seed (different from the current one), recorded in the proposal. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        future weeks may be regenerated. seed defaults to a fresh random seed (different from the current one), recorded in the proposal. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
       requestBody:
@@ -318,7 +326,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ProposeRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '201':
           description: The stored proposal.
           headers:
@@ -409,7 +421,7 @@ paths:
       tags: [Proposals]
       operationId: getProposal
       summary: Read a stored proposal
-      description: Returns the proposal while it is unexpired. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      description: Returns the proposal while it is unexpired. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/ProposalId'
@@ -471,11 +483,15 @@ paths:
       tags: [Proposals]
       operationId: discardProposal
       summary: Discard a proposal
-      description: Drops the proposal; no revision is created. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      description: Drops the proposal; no revision is created. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/ProposalId'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '204':
           description: Proposal discarded.
           headers:
@@ -516,7 +532,7 @@ paths:
         and recipes, rules, and pantry are unchanged since the preview. An identical
         proposal returns changed: false and creates no revision. Retrying with the same
         Idempotency-Key and request replays the original result with replayed: true.
-        Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/ProposalId'
@@ -528,7 +544,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ExpectedRevisionRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The resulting revision.
           headers:
@@ -638,7 +658,7 @@ paths:
         Appends revision N + 1 whose content equals revision N - 1; history is never
         deleted. Undoing twice therefore returns to the later content. Idempotency-Key
         semantics match accept. Weekly rules are advisory for undo: restoring a revision that
-        violates them (for example a swapped week) is allowed and never refused. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        violates them (for example a swapped week) is allowed and never refused. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -649,7 +669,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ExpectedRevisionRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The resulting revision.
           headers:
@@ -759,7 +783,7 @@ paths:
         revision the trip covered. A swap to the variant already in the slot previews as no
         change (empty changes and grocery_delta). Only slots dated today or later in the
         household timezone can be swapped, including slots of a started week. Requires a
-        SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        SQLite-backed API (403 read_only otherwise) and a logged-in user (401 unauthenticated).
       parameters:
         - $ref: '#/components/parameters/PlanId'
       requestBody:
@@ -769,7 +793,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SwapRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: What the swap would do.
           headers:
@@ -850,8 +878,7 @@ paths:
         nothing and creates no revision: the response is 200 with the current plan. Retrying with
         the same Idempotency-Key and the same body returns the original result (200, no new
         revision); the same key with a different body is 422 retry_id_reused. A stale
-        expected_revision is 409 stale_revision. Requires a SQLite-backed API and a loopback
-        client; otherwise 403 read_only or forbidden.
+        expected_revision is 409 stale_revision. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -862,7 +889,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SwapRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: Nothing changed (the slot already had that variant) or a replay of an earlier request with the same Idempotency-Key. The plan is the revision that request resulted in.
           headers:
@@ -966,7 +997,7 @@ paths:
       tags: [Plans]
       operationId: listRevisions
       summary: List a plan's revision history
-      description: Oldest first. Summaries only; revisions are immutable and never deleted. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+      description: Oldest first. Summaries only; revisions are immutable and never deleted. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/PlanId'
       responses:
@@ -1009,7 +1040,7 @@ paths:
         error code and message) does not stop or undo the others. Solves run
         sequentially and the whole fill holds one generation slot (503 generation_busy
         when busy). The call can take as long as one solve per created week. Requires a
-        SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        SQLite-backed API (403 read_only otherwise) and a logged-in user (401 unauthenticated).
       parameters:
         - $ref: '#/components/parameters/Month'
       requestBody:
@@ -1019,7 +1050,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/FillMonthRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: One outcome per week, in week order.
           headers:
@@ -1115,7 +1150,7 @@ paths:
       operationId: createShoppingTrip
       summary: Create an open shopping trip for weeks
       description: |-
-        Creates an open trip (version 1) covering the given plans. A plan belongs to at most one trip of any status (409 week_already_on_trip). name is an optional short label; it defaults to the covered date range. Trips never modify plans or create plan revisions. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Creates an open trip (version 1) covering the given plans. A plan belongs to at most one trip of any status (409 week_already_on_trip). name is an optional short label; it defaults to the covered date range. Trips never modify plans or create plan revisions. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       requestBody:
         required: true
         description: Plans to cover and an optional label.
@@ -1123,7 +1158,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateShoppingTripRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '201':
           description: The new trip.
           headers:
@@ -1192,11 +1231,15 @@ paths:
       operationId: deleteShoppingTrip
       summary: Delete a shopping trip
       description: |-
-        Deletes the trip in any status, which frees its weeks. Plans are untouched. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Deletes the trip in any status, which frees its weeks. Plans are untouched. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
         - $ref: '#/components/parameters/ExpectedVersion'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '204':
           description: Trip deleted.
           headers:
@@ -1219,7 +1262,7 @@ paths:
       operationId: addShoppingTripWeek
       summary: Add a week to an open trip
       description: |-
-        Adds a plan's week to an open trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when the plan is already on a trip. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Adds a plan's week to an open trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when the plan is already on a trip. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1229,7 +1272,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AddTripWeekRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The updated trip.
           headers:
@@ -1260,12 +1307,16 @@ paths:
       operationId: removeShoppingTripWeek
       summary: Remove a week from an open trip
       description: |-
-        Removes the plan's week from an open trip. 409 trip_done on a done trip (reopen it first), 409 last_week for the last remaining week (delete the trip instead), 404 week_not_on_trip when the plan is not on this trip. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Removes the plan's week from an open trip. 409 trip_done on a done trip (reopen it first), 409 last_week for the last remaining week (delete the trip instead), 404 week_not_on_trip when the plan is not on this trip. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/ExpectedVersion'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The updated trip.
           headers:
@@ -1296,7 +1347,7 @@ paths:
       operationId: markShoppingTripDone
       summary: Mark a trip done
       description: |-
-        Records, for every week, the plan's current revision and snapshot_id; items are frozen to those revisions from now on. 409 trip_not_done when the trip is already done. A plan edited afterwards only shows changed_since_shopping on its week. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Records, for every week, the plan's current revision and snapshot_id; items are frozen to those revisions from now on. 409 trip_not_done when the trip is already done. A plan edited afterwards only shows changed_since_shopping on its week. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1306,7 +1357,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ExpectedVersionRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The done trip.
           headers:
@@ -1337,7 +1392,7 @@ paths:
       operationId: reopenShoppingTrip
       summary: Reopen a done trip
       description: |-
-        Returns a done trip to open; items follow the weeks' current revisions again. 409 trip_not_done when the trip is already open. Requires a SQLite-backed API and a loopback client; otherwise 403 read_only or forbidden.
+        Returns a done trip to open; items follow the weeks' current revisions again. 409 trip_not_done when the trip is already open. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1347,7 +1402,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ExpectedVersionRequest'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The reopened trip.
           headers:
@@ -1410,7 +1469,11 @@ paths:
       summary: Publishing status
       description: |-
         Whether publishing is configured (enabled), the public site URL, the most recently started job and the most recent job confirmed live. A latest job in status pushed is refreshed from GitHub first (cached for at least 10 seconds), so it may come back live or failed. Job records are private and never part of the public bundle.
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: Publishing status.
           headers:
@@ -1446,7 +1509,11 @@ paths:
             type: string
             pattern: '^\d{4}-(0[1-9]|1[0-2])(,\d{4}-(0[1-9]|1[0-2])){0,11}$'
           example: 2026-10,2026-11
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The preview.
           headers:
@@ -1475,7 +1542,7 @@ paths:
       operationId: createPublicationJob
       summary: Publish the selected months
       description: |-
-        Runs synchronously: exports the selected months, validates the bundle, commits it to the public repository and pushes it. The response is the finished job: pushed (the Pages deployment is still to be confirmed through the job resource) or unchanged (the repository already had identical content; nothing was committed). One job runs at a time (409 publish_in_progress). A failure is recorded as a failed job, answered with 502 publish_failed, and leaves the previously pushed version untouched. Needs a loopback client (403 forbidden) and publishing configured (503 publishing_disabled, also when the application revision is unknown).
+        Runs synchronously: exports the selected months, validates the bundle, commits it to the public repository and pushes it. The response is the finished job: pushed (the Pages deployment is still to be confirmed through the job resource) or unchanged (the repository already had identical content; nothing was committed). One job runs at a time (409 publish_in_progress). A failure is recorded as a failed job, answered with 502 publish_failed, and leaves the previously pushed version untouched. Needs a logged-in user (401 unauthenticated) and publishing configured (503 publishing_disabled, also when the application revision is unknown).
       requestBody:
         required: true
         content:
@@ -1484,7 +1551,11 @@ paths:
               $ref: '#/components/schemas/PublishRequest'
             example:
               months: ['2026-10', '2026-11']
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '201':
           description: The finished job.
           headers:
@@ -1525,7 +1596,11 @@ paths:
         A job in status pushed is refreshed from the GitHub Actions run for its commit (cached for at least 10 seconds): live (with deployed_at) once the Pages deployment succeeded, failed when it did not. If GitHub cannot be reached the job stays pushed. live is never reported without that confirmation.
       parameters:
         - $ref: '#/components/parameters/JobId'
+      security:
+        - cookieAuth: []
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '200':
           description: The job.
           headers:
@@ -1555,10 +1630,13 @@ paths:
       operationId: getCapabilities
       summary: Read what this client may do
       description: |-
-        can_edit_plans and can_edit_shopping_trips are true only when the API is backed by
-        SQLite and the request comes from a loopback address. Clients must use it, never their own guess, to
-        decide whether to offer editing. The server re-checks authorization on every
-        mutation regardless of this value.
+        Open to everyone. Without a session every can_* is false and authenticated is false
+        (the client then offers viewing and a login). With a session, authenticated is true,
+        username names the user, and can_edit_plans and can_edit_shopping_trips are true only
+        when the API is backed by SQLite; can_publish is true only when publishing is configured
+        (MEALPLANNER_PUBLISH_REPO). Every logged-in user has the same abilities. Clients must use
+        it, never their own guess, to decide what to offer. The server re-checks authorization on
+        every mutation regardless of this value.
       responses:
         '200':
           description: Capabilities for this client.
@@ -1574,9 +1652,158 @@ paths:
                 $ref: '#/components/schemas/Capabilities'
               examples:
                 editable:
-                  summary: Editing available
+                  summary: Logged in, editing and publishing available
                   externalValue: examples/capabilities.json
+                anonymous:
+                  summary: No session
+                  externalValue: examples/capabilities-anonymous.json
+  /api/v1/session:
+    get:
+      tags: [Session]
+      operationId: getSession
+      summary: Who is logged in
+      description: Answers 200 with the username when the request carries a valid session cookie, else 401 unauthenticated. Use it to decide whether to show the login screen.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: The logged-in user.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                session:
+                  summary: Logged in
+                  externalValue: examples/session.json
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      tags: [Session]
+      operationId: login
+      summary: Log in
+      description: |-
+        Checks the household credentials and starts a session. The response sets the mp_session
+        cookie (HttpOnly, SameSite=Lax, Path=/, Secure unless the server runs with
+        MEALPLANNER_COOKIE_SECURE=0) whose Max-Age is the remaining absolute session lifetime
+        (90 days; a session unused for 30 days also ends). An unknown user, a wrong password and a
+        disabled account are indistinguishable (401 invalid_credentials). After 5 failures in 15
+        minutes for one username or one client address, further attempts get 429 too_many_attempts
+        with a Retry-After header in seconds, even with the right password. A cross-site request is
+        403 cross_origin_rejected. Accounts are created by the household with the db_cli user commands.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in; the session cookie is set.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Set-Cookie:
+              description: The mp_session cookie.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                session:
+                  summary: Logged in
+                  externalValue: examples/session.json
+        '401':
+          description: Wrong username or password, or a disabled account (invalid_credentials).
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidCredentials:
+                  summary: Credentials not accepted
+                  externalValue: examples/error-invalid-credentials.json
+        '403':
+          $ref: '#/components/responses/CrossOriginRejected'
+        '422':
+          description: The body is not a JSON object with a non-empty string username and password and nothing else (invalid_request).
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidLogin:
+                  summary: Missing password
+                  externalValue: examples/error-invalid-login.json
+        '429':
+          description: Too many failed attempts (too_many_attempts); wait Retry-After seconds.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Retry-After:
+              description: Seconds until another attempt is allowed.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                tooManyAttempts:
+                  summary: Temporarily locked out
+                  externalValue: examples/error-too-many-attempts.json
+    delete:
+      tags: [Session]
+      operationId: logout
+      summary: Log out
+      description: Ends the session behind the cookie and clears the cookie. Idempotent and always 204, with or without a session. A cross-site request is 403 cross_origin_rejected.
+      security: []
+      responses:
+        '204':
+          description: Logged out.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+        '403':
+          $ref: '#/components/responses/CrossOriginRejected'
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: mp_session
+      description: Session cookie set by POST /api/v1/session (HttpOnly, SameSite=Lax). Browsers send it automatically.
   parameters:
     Month:
       name: month
@@ -1696,8 +1923,8 @@ components:
             invalidWeek:
               summary: week_start is not a Monday
               externalValue: examples/error-invalid-week.json
-    WriteForbidden:
-      description: Mutations and history need a loopback client (forbidden) and a SQLite-backed API (read_only, JSON snapshot mode).
+    Unauthenticated:
+      description: No valid session (unauthenticated). Log in with POST /api/v1/session.
       headers:
         Cache-Control:
           description: Responses are not stored by caches.
@@ -1709,9 +1936,41 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           examples:
-            forbidden:
-              summary: Non-loopback client attempted a change
-              externalValue: examples/error-forbidden.json
+            unauthenticated:
+              summary: Not logged in
+              externalValue: examples/error-unauthenticated.json
+    CrossOriginRejected:
+      description: A state-changing request that did not come from this site (cross_origin_rejected).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            crossOrigin:
+              summary: Sec-Fetch-Site or Origin names another site
+              externalValue: examples/error-cross-origin-rejected.json
+    WriteForbidden:
+      description: Plan and shopping changes need a SQLite-backed API (read_only, JSON snapshot mode) and a request from this site (cross_origin_rejected).
+      headers:
+        Cache-Control:
+          description: Responses are not stored by caches.
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            crossOrigin:
+              summary: Sec-Fetch-Site or Origin names another site
+              externalValue: examples/error-cross-origin-rejected.json
             readOnly:
               summary: API is serving the JSON snapshot
               externalValue: examples/error-read-only.json
@@ -2207,17 +2466,44 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [can_edit_plans, can_edit_shopping_trips, can_publish]
+      required: [authenticated, can_edit_plans, can_edit_shopping_trips, can_publish]
       properties:
+        authenticated:
+          type: boolean
+          description: True when the request carries a valid session.
+        username:
+          type: string
+          description: The logged-in user; present only when authenticated.
         can_edit_plans:
           type: boolean
-          description: True only for a loopback client of a SQLite-backed API.
+          description: True only for a logged-in user of a SQLite-backed API.
         can_edit_shopping_trips:
           type: boolean
           description: True under the same conditions; gates creating, changing, finishing, and deleting shopping trips.
         can_publish:
           type: boolean
-          description: True only for a loopback client when publishing is configured (MEALPLANNER_PUBLISH_REPO); gates the publish view.
+          description: True only for a logged-in user when publishing is configured (MEALPLANNER_PUBLISH_REPO); gates the publish view.
+    Session:
+      type: object
+      additionalProperties: false
+      required: [username]
+      properties:
+        username:
+          type: string
+          description: The logged-in user's (normalized, lowercase) username.
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
     PublishRequest:
       type: object
       additionalProperties: false
@@ -2904,7 +3190,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, forbidden, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week, invalid_months, publish_in_progress, publishing_disabled, publish_failed, not_found]
+              enum: [invalid_request, invalid_week, unauthenticated, invalid_credentials, too_many_attempts, cross_origin_rejected, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week, invalid_months, publish_in_progress, publishing_disabled, publish_failed, not_found]
             message:
               type: string
             details:

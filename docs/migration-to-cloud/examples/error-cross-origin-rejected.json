@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "cross_origin_rejected",
+    "message": "This request did not come from this site.",
+    "details": []
+  }
+}

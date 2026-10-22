@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Protocol
 
+from ..domain.auth import SessionRecord, User
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.shopping_trip import ShoppingTrip
 from ..domain.snapshot import JsonObject
@@ -176,3 +177,41 @@ class PublishJobRepository(Protocol):
 
     def last_with_status(self, statuses: tuple[str, ...]) -> PublishJob | None:
         """The most recently started job whose status is one of ``statuses``."""
+
+
+class UserRepository(Protocol):
+    """Household login accounts."""
+
+    def add(self, user: User) -> None:
+        """Insert a user. Raises ``UsernameTaken`` when the (normalized) username exists."""
+
+    def get_by_username(self, username: str) -> User | None: ...
+
+    def get_by_id(self, user_id: str) -> User | None: ...
+
+    def list(self) -> list[User]:
+        """Every user, oldest first."""
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
+
+    def set_disabled(self, user_id: str, disabled: bool) -> None: ...
+
+    def delete(self, user_id: str) -> None:
+        """Remove the user (its sessions go with it)."""
+
+
+class SessionRepository(Protocol):
+    """Login sessions, keyed by the SHA-256 of the cookie token."""
+
+    def add(self, session: SessionRecord) -> None: ...
+
+    def get(self, session_hash: str) -> SessionRecord | None: ...
+
+    def touch(self, session_hash: str, seen_at: datetime) -> None: ...
+
+    def delete(self, session_hash: str) -> None: ...
+
+    def delete_for_user(self, user_id: str) -> None: ...
+
+    def delete_expired(self, now: datetime, idle_before: datetime) -> None:
+        """Drop sessions past their absolute expiry or last seen before ``idle_before``."""

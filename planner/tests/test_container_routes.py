@@ -1,4 +1,4 @@
-"""Health check, same-origin frontend serving and the container's network-trust switch."""
+"""Health check, same-origin frontend serving and the open-reads rule."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def test_static_serving_cannot_escape_the_directory(dist: Path) -> None:
 
 
 def test_api_still_served_next_to_static(dist: Path) -> None:
-    client = make_client(static_dir=dist, trust_network_peers=True)
+    client = make_client(static_dir=dist)
     assert client.get("/api/v1/plans/plan_2026_10_19", environ_base=REMOTE).status_code == 200
     assert client.get("/api/v1/nope", environ_base=REMOTE).status_code == 404
 
@@ -80,14 +80,8 @@ def test_static_dir_without_index_fails_fast(tmp_path: Path) -> None:
         make_client(static_dir=tmp_path)
 
 
-def test_remote_peers_rejected_unless_network_is_trusted() -> None:
+def test_reads_are_open_from_any_peer_and_changes_need_a_session() -> None:
+    client = make_client()
     url = "/api/v1/plans/plan_2026_10_19"
-    assert make_client().get(url, environ_base=REMOTE).status_code == 403
-    trusted = make_client(trust_network_peers=True)
-    assert trusted.get(url, environ_base=REMOTE).status_code == 200
-
-
-def test_trust_switch_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEALPLANNER_TRUST_NETWORK_PEERS", "1")
-    response = make_client().get("/api/v1/plans/plan_2026_10_19", environ_base=REMOTE)
-    assert response.status_code == 200
+    assert client.get(url, environ_base=REMOTE).status_code == 200
+    assert client.post("/api/v1/plans", json={}, environ_base=REMOTE).status_code == 401

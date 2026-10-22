@@ -6,10 +6,11 @@ import pytest
 
 from mealplanner.entrypoints.http.app import create_app
 
+from auth_helpers import logged_in_client
+
 from test_write_api import (  # noqa: F401  (fixtures + helpers)
     FUTURE_ID,
     KEY,
-    LAN,
     app,
     check_schema,
     clock,
@@ -26,7 +27,7 @@ SWAPS = f"/api/v1/plans/{FUTURE_ID}/swaps"
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    return logged_in_client(app)
 
 
 def catalog(client) -> list[dict]:
@@ -61,7 +62,7 @@ def test_catalog_lists_sorted_variants_with_display_names(client) -> None:
 
 
 def test_catalog_is_unavailable_in_json_mode() -> None:
-    client = create_app(week_start="2026-10-19").test_client()
+    client = logged_in_client(create_app(week_start="2026-10-19"))
     error = fail(client.get("/api/v1/catalog/variants"), 503, "source_unavailable")
     assert "SQLite" in error["message"]
 
@@ -163,12 +164,14 @@ def test_swap_requires_a_single_idempotency_key(client, plan) -> None:
     fail(client.post(PREVIEW, data="x", content_type="text/plain"), 400, "invalid_request")
 
 
-def test_swap_routes_are_gated_like_other_writes(client, plan, tmp_path) -> None:
+def test_swap_routes_are_gated_like_other_writes(app, client, plan, tmp_path) -> None:
     lunch = linked_lunch(plan)
     good = body(lunch, other_variant(client, lunch))
-    fail(client.post(PREVIEW, json=good, environ_base=LAN), 403, "forbidden")
-    fail(client.post(SWAPS, json=good, headers=KEY, environ_base=LAN), 403, "forbidden")
-    json_client = create_app(week_start="2026-10-19").test_client()
+    anonymous = app.test_client()
+    fail(anonymous.post(PREVIEW, json=good), 401, "unauthenticated")  # preview is a POST: login required too
+    fail(anonymous.post(SWAPS, json=good, headers=KEY), 401, "unauthenticated")
+    assert anonymous.get("/api/v1/catalog/variants").status_code == 200
+    json_client = logged_in_client(create_app(week_start="2026-10-19"))
     fail(json_client.post(PREVIEW, json=good), 403, "read_only")
     fail(json_client.post(SWAPS, json=good, headers=KEY), 403, "read_only")
     assert ok(client.get(f"/api/v1/plans/{FUTURE_ID}"), 200, "Plan")["revision"] == 1

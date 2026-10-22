@@ -2,7 +2,7 @@
 
 All trip rules live in ShoppingTripService and domain/shopping_trip.py. Reads are open
 like other reads (an empty list when the API is not SQLite-backed); every mutation is
-gated exactly like the plan writes (loopback client and SQLite-backed API, else 403).
+gated exactly like the plan writes (a logged-in user and a SQLite-backed API, else 401 or 403).
 """
 
 from __future__ import annotations
@@ -44,9 +44,7 @@ MESSAGES = {
 }
 
 
-def register_trip_routes(
-    app: Any, error: Callable[..., Any], is_loopback: Callable[[], bool]
-) -> None:
+def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
     from flask import jsonify, request
 
     def service() -> ShoppingTripService | None:
@@ -64,9 +62,7 @@ def register_trip_routes(
         return error(503, code, message)
 
     def guard():
-        """Server-side authorization boundary for every mutation."""
-        if not is_loopback():
-            return error(403, "forbidden", "Plan changes are allowed from this machine only.")
+        """Mutations need the SQLite-backed API; the login check itself is app.py's before_request guard."""
         if service() is None:
             return error(
                 403, "read_only", "Plan changes need the SQLite-backed API (MEALPLANNER_DB)."

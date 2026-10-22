@@ -1,5 +1,6 @@
 // Publish client for the home (API-mode) deployment only; loaded lazily with the Publish view and absent from the Pages build.
 import { ReaderError, normalizeError } from '../readers/shared.js';
+import { notifyIfUnauthenticated } from '../auth/authStore.js';
 import { monthsParam } from '../publishModel.js';
 
 export function createPublishApi(base = '/api/v1') {
@@ -16,6 +17,7 @@ export function createPublishApi(base = '/api/v1') {
     if (!response.ok) {
       const error = payload?.error;
       if (!error || typeof error.code !== 'string' || typeof error.message !== 'string') throw new ReaderError('source_invalid', 'The API returned an invalid error response.');
+      notifyIfUnauthenticated(response.status, error.code);
       const normalized = normalizeError(error.code, error.message, error.details);
       normalized.status = response.status;
       throw normalized;

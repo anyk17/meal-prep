@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unauthenticated",
+    "message": "Log in to continue.",
+    "details": []
+  }
+}

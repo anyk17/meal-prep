@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 import threading
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime
 
+from ..domain.auth import SessionRecord, User, UsernameTaken
 from ..domain.shopping_trip import ShoppingTrip, StaleVersion, TripNotFound, WeekAlreadyOnTrip
 from ..domain.snapshot import JsonObject, PlanSnapshot
 from ..domain.weekly_plan import (
@@ -171,3 +173,64 @@ class InMemoryShoppingTripRepository:
                 raise StaleVersion(expected_version, stored.version)
             del self._trips[trip_id]
             self._release(trip_id)
+
+
+class InMemoryUserRepository:
+    """Reference implementation of UserRepository."""
+
+    def __init__(self) -> None:
+        self._users: dict[str, User] = {}
+
+    def add(self, user: User) -> None:
+        if any(u.username == user.username for u in self._users.values()):
+            raise UsernameTaken(f"username already exists: {user.username}")
+        self._users[user.user_id] = user
+
+    def get_by_username(self, username: str) -> User | None:
+        return next((u for u in self._users.values() if u.username == username), None)
+
+    def get_by_id(self, user_id: str) -> User | None:
+        return self._users.get(user_id)
+
+    def list(self) -> list[User]:
+        return list(self._users.values())
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        self._users[user_id] = replace(self._users[user_id], password_hash=password_hash)
+
+    def set_disabled(self, user_id: str, disabled: bool) -> None:
+        self._users[user_id] = replace(self._users[user_id], disabled=disabled)
+
+    def delete(self, user_id: str) -> None:
+        self._users.pop(user_id, None)
+
+
+class InMemorySessionRepository:
+    """Reference implementation of SessionRepository."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, SessionRecord] = {}
+
+    def add(self, session: SessionRecord) -> None:
+        self._sessions[session.session_hash] = session
+
+    def get(self, session_hash: str) -> SessionRecord | None:
+        return self._sessions.get(session_hash)
+
+    def touch(self, session_hash: str, seen_at: datetime) -> None:
+        if session_hash in self._sessions:
+            self._sessions[session_hash] = replace(self._sessions[session_hash], last_seen_at=seen_at)
+
+    def delete(self, session_hash: str) -> None:
+        self._sessions.pop(session_hash, None)
+
+    def delete_for_user(self, user_id: str) -> None:
+        self._sessions = {h: s for h, s in self._sessions.items() if s.user_id != user_id}
+
+    def delete_expired(self, now: datetime, idle_before: datetime) -> None:
+        self._sessions = {
+            h: s for h, s in self._sessions.items() if s.expires_at > now and s.last_seen_at >= idle_before
+        }
+
+    def count(self) -> int:
+        return len(self._sessions)

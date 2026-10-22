@@ -164,6 +164,28 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )""",
         ),
     ),
+    (
+        5,
+        "household login",
+        (
+            # username is stored NFKC-normalized and lowercased; sessions keep only the SHA-256 of the cookie token.
+            """CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1))
+            )""",
+            """CREATE TABLE sessions (
+                session_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX sessions_user ON sessions (user_id)",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

@@ -35,11 +35,12 @@ from mealplanner.application.publishing import (
     validate_months,
 )
 from mealplanner.entrypoints.http.app import create_app
+
+from auth_helpers import logged_in_client
 from tests.test_publication_export import NOW, TZ, W_NOV02, W_OCT26, Env
 
 SHA = "a" * 40
 LOCAL = {"REMOTE_ADDR": "127.0.0.1"}
-LAN = {"REMOTE_ADDR": "192.168.1.20"}
 
 
 def sh(*args: str, cwd: Path | None = None) -> str:
@@ -479,7 +480,7 @@ def test_github_reader_states_and_cache() -> None:
 @pytest.fixture
 def client(setup: Setup):
     app = create_app(db_path=setup.env.db, clock=setup.clock, publishing_service=setup.service)
-    return app.test_client()
+    return logged_in_client(app)
 
 
 def error_code(response, status: int) -> str:
@@ -488,9 +489,9 @@ def error_code(response, status: int) -> str:
 
 
 def test_capabilities_flag(setup: Setup) -> None:
-    on = create_app(db_path=setup.env.db, clock=setup.clock, publishing_service=setup.service).test_client()
+    on = logged_in_client(create_app(db_path=setup.env.db, clock=setup.clock, publishing_service=setup.service))
     assert on.get("/api/v1/capabilities", environ_base=LOCAL).get_json()["can_publish"] is True
-    off = create_app(db_path=setup.env.db, clock=setup.clock).test_client()
+    off = logged_in_client(create_app(db_path=setup.env.db, clock=setup.clock))
     assert off.get("/api/v1/capabilities", environ_base=LOCAL).get_json()["can_publish"] is False
 
 
@@ -530,7 +531,14 @@ def test_route_errors(client, setup: Setup) -> None:
         assert error_code(client.post("/api/v1/publishing/jobs", json={"months": months}, environ_base=LOCAL), 422) == "invalid_months"
     assert error_code(client.post("/api/v1/publishing/jobs", json={}, environ_base=LOCAL), 400) == "invalid_request"
     assert error_code(client.post("/api/v1/publishing/jobs", json={"months": MONTHS, "x": 1}, environ_base=LOCAL), 400) == "invalid_request"
-    assert error_code(client.post("/api/v1/publishing/jobs", json={"months": MONTHS}, environ_base=LAN), 403) == "forbidden"
+    anonymous = create_app(db_path=setup.env.db, clock=setup.clock, publishing_service=setup.service).test_client()
+    for response in (
+        anonymous.post("/api/v1/publishing/jobs", json={"months": MONTHS}),
+        anonymous.get("/api/v1/publishing"),  # publishing is a household action: reads need login too
+        anonymous.get("/api/v1/publishing/preview?months=2026-10"),
+        anonymous.get("/api/v1/publishing/jobs/job_nope"),
+    ):
+        assert error_code(response, 401) == "unauthenticated"
     assert error_code(client.get("/api/v1/publishing/jobs/job_nope", environ_base=LOCAL), 404) == "not_found"
     assert setup.jobs.latest() is None
 
@@ -549,7 +557,7 @@ def test_route_conflict_and_failure(client, setup: Setup, tmp_path) -> None:
 
 def test_disabled_without_configuration(setup: Setup, monkeypatch) -> None:
     monkeypatch.delenv("MEALPLANNER_PUBLISH_REPO", raising=False)
-    client = create_app(db_path=setup.env.db, clock=setup.clock).test_client()
+    client = logged_in_client(create_app(db_path=setup.env.db, clock=setup.clock))
     body = client.get("/api/v1/publishing", environ_base=LOCAL).get_json()
     assert body["enabled"] is False and body["latest_job"] is None and body["site_url"].startswith("https://")
     for response in (
