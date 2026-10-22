@@ -66,6 +66,7 @@ function App() {
   const [tripId, setTripId] = useState(null);
   const [tripNonce, setTripNonce] = useState(0);
   const [selectedPlans, setSelectedPlans] = useState([]);
+  const [newListHint, setNewListHint] = useState(false);
   const [monthCoverage, setMonthCoverage] = useState(() => new Map());
   const [review, setReview] = useState(null);
   const [swapSlot, setSwapSlot] = useState(null);
@@ -173,12 +174,12 @@ function App() {
     setWeekStart(target);
   };
   const reload = async (refresh = false) => { if (refresh) void refreshCapabilities(); await loadData(refresh); };
-  const showShopping = () => { setReview(null); setView('shopping'); };
-  const showPublish = () => { setReview(null); setView('publish'); };
-  const openTrip = id => { setReview(null); setTripId(id); setView('shopping'); };
+  const showShopping = () => { setReview(null); setNewListHint(false); setView('shopping'); };
+  const showPublish = () => { setReview(null); setNewListHint(false); setView('publish'); };
+  const openTrip = id => { setReview(null); setNewListHint(false); setTripId(id); setView('shopping'); };
   const togglePlan = id => setSelectedPlans(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
   const showMonth = () => { setReview(null); setMonth(monthOf(weekStart)); setView('month'); };
-  const openWeek = target => { if (target === weekStart) void loadData(); else goToWeek(target); setView('week'); };
+  const openWeek = target => { setNewListHint(false); if (target === weekStart) void loadData(); else goToWeek(target); setView('week'); };
   // Month view reads through the shared reader; a static refresh re-pins the publication, then the month reloads.
   const reloadMonth = async (refresh = false) => {
     if (refresh) void refreshCapabilities();
@@ -291,6 +292,9 @@ function App() {
           ))}
         </div>
 
+        {view === 'month' && newListHint && canEditTrips && selectedPlans.length === 0 && (
+          <p role="status" className="mb-3 rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/30 px-3 py-2 text-sm text-indigo-900 dark:text-indigo-100">New shopping list: tick the weeks you want to shop for below, then tap Create shopping list.</p>
+        )}
         {view === 'month' && (
           <MonthView reader={reader} month={month} onMonth={setMonth} thisMonth={monthOf(todayIn(plan?.timezone))} nonce={monthNonce}
             canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} onCoverage={setMonthCoverage} />
@@ -311,7 +315,7 @@ function App() {
 
         {view === 'shopping' && (
           <TripsView reader={reader} tripId={tripId} onSelect={setTripId} nonce={monthNonce} canEdit={canEditTrips} TripControls={TripControls}
-            onOpenWeek={openWeek} onChanged={() => setTripNonce(value => value + 1)} />
+            onOpenWeek={openWeek} onChanged={() => setTripNonce(value => value + 1)} onNewList={() => { setSelectedPlans([]); showMonth(); setNewListHint(true); }} />
         )}
 
         {view === 'week' && <>

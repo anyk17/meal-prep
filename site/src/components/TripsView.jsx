@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
-import { ArrowLeft, Check, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Check, Plus, ShoppingCart } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatWeekRange } from '../dates.js';
 import { countChecked, formatQuantity, weekGroupsLabel, groupItemsByShelfLife, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../tripModel.js';
@@ -20,7 +20,7 @@ function TripList({ trips, onOpen, staticMode, canEdit }) {
       <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center text-slate-600 dark:text-slate-300 space-y-2">
         <ShoppingCart className="mx-auto text-slate-400" />
         <p className="font-medium">{staticMode ? 'No shopping lists have been published yet.' : 'No shopping lists yet.'}</p>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{staticMode ? 'Check back after the next publication.' : canEdit ? 'Open the Month view, tick the weeks you want to shop for, and create a list.' : 'Shopping lists can be created from the Month view at home.'}</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">{staticMode ? 'Check back after the next publication.' : canEdit ? 'Tap New list, tick the weeks you want to shop for, and create it.' : 'Shopping lists can be created from the Month view at home.'}</p>
       </div>
     );
   }
@@ -114,7 +114,7 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
   );
 }
 
-export function TripsView({ reader, tripId, onSelect, nonce, canEdit, TripControls, onOpenWeek, onChanged }) {
+export function TripsView({ reader, tripId, onSelect, nonce, canEdit, TripControls, onOpenWeek, onChanged, onNewList }) {
   const [state, setState] = useState({ key: null });
   const [retry, setRetry] = useState(0);
   const requestKey = `${reader.mode}:${nonce}:${retry}`;
@@ -146,7 +146,10 @@ export function TripsView({ reader, tripId, onSelect, nonce, canEdit, TripContro
   if (!trip) {
     return (
       <div className="space-y-4" data-testid="trips-view">
-        <div className="flex items-center gap-2"><ShoppingCart className="text-indigo-600 dark:text-indigo-400" /><h2 className="text-xl font-bold text-slate-800 dark:text-white">Shopping lists</h2></div>
+        <div className="flex items-center gap-2">
+          <ShoppingCart className="text-indigo-600 dark:text-indigo-400" /><h2 className="text-xl font-bold text-slate-800 dark:text-white flex-1">Shopping lists</h2>
+          {canEdit && onNewList && <button type="button" onClick={onNewList} className="inline-flex items-center gap-1 min-h-11 px-4 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500"><Plus size={16} />New list</button>}
+        </div>
         {staticMode && reader.context?.exported_at && <p className="text-xs text-slate-500 dark:text-slate-400">Snapshot as of {formatDateTime(reader.context.exported_at)}</p>}
         <TripList trips={current.trips} onOpen={onSelect} staticMode={staticMode} canEdit={canEdit} />
       </div>
