@@ -415,7 +415,7 @@ WSL (needs Docker; the user must be in the `docker` group):
 ```sh
 cd /home/julopez/dev/meal-prep
 mkdir -p var/docker-data
-docker compose -f deploy/docker-compose.dev.yml up --build   # http://127.0.0.1:8080/
+scripts/dev-up.sh   # rebuild + restart with APP_REVISION set; http://127.0.0.1:8080/
 docker compose -f deploy/docker-compose.dev.yml down
 ```
 
@@ -451,7 +451,7 @@ One-time setup:
 
 1. In `meal-plan` (Settings, Deploy keys) add the **public** half of a key as a deploy key with **write access**, and in Pages settings choose "GitHub Actions" as the source. The private half is a file only the container reads: dev `var/secrets/deploy_key` (git-ignored, `chmod 600`, owned by your user), NAS `/volume1/docker/meal-prep/secrets/deploy_key` (`chown 10001:10001`, `chmod 600`). A Compose `secrets: file:` mount keeps the host file's owner and mode, and ssh rejects a key the container user does not own or others can read, so these must match the uid the container runs as (dev: your uid; NAS: 10001).
 2. Dev: run Compose with the commit the frontend code should come from, and make sure that commit exists on the public `meal-prep` repository (the `meal-plan` workflow checks it out):
-   `APP_REVISION=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.dev.yml up --build`. The dev file builds the image with your uid/gid (`DEV_UID`/`DEV_GID`), because ssh refuses to run for a uid without a passwd entry. The NAS image gets its revision from the container workflow (`github.sha`). Without Docker (`python -m mealplanner.entrypoints.http.app`), export `MEALPLANNER_PUBLISH_REPO=git@github.com:jflopezo91/meal-plan.git`, `MEALPLANNER_PUBLISH_KEY=var/secrets/deploy_key` and `MEALPLANNER_PUBLISH_KNOWN_HOSTS=deploy/github_known_hosts`. An existing database needs `db_cli migrate` once (migration 4) before the API will read it; the container does that at start.
+   `scripts/dev-up.sh` (it sets `APP_REVISION=$(git rev-parse HEAD)` and refuses an unpushed commit; a plain `docker compose up --build` leaves the revision empty and Publish answers 503). The dev file builds the image with your uid/gid (`DEV_UID`/`DEV_GID`), because ssh refuses to run for a uid without a passwd entry. The NAS image gets its revision from the container workflow (`github.sha`). Without Docker (`python -m mealplanner.entrypoints.http.app`), export `MEALPLANNER_PUBLISH_REPO=git@github.com:jflopezo91/meal-plan.git`, `MEALPLANNER_PUBLISH_KEY=var/secrets/deploy_key` and `MEALPLANNER_PUBLISH_KNOWN_HOSTS=deploy/github_known_hosts`. An existing database needs `db_cli migrate` once (migration 4) before the API will read it; the container does that at start.
 
 Publishing: open the publish view, select months, check the preview (every week with its revision and the revision last confirmed live, every trip, the warning that everything is public), and press Publish. The request runs the export, validates the bundle, commits `publication/` and `app-ref` and pushes, then answers `pushed` (or `unchanged` when nothing differs). The page then follows the job until GitHub reports the Pages deployment finished (`live`) or failed. Over HTTP:
 

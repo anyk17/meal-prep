@@ -7,7 +7,7 @@
 # A Compose `secrets: file:` keeps the host file's owner and mode, and ssh refuses a key the running user
 # cannot own, so the container runs as your uid (DEV_UID/DEV_GID, built into the image as the `app` user).
 # APP_REVISION is the meal-prep commit recorded as `app-ref`; it must exist on the public meal-prep repo:
-#   APP_REVISION=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.dev.yml up --build
+#   scripts/dev-up.sh   (sets APP_REVISION=$(git rev-parse HEAD) and checks it is pushed)
 services:
   meal-prep:
     build:
