@@ -246,6 +246,23 @@ Keep weekly shopping totals per week. A trip's items are a plain sum of its week
 
 **Exit:** a swap updates the saved revision and that week's groceries in one revision; stale or duplicate requests cannot apply twice; linked swaps are atomic; rule violations are shown but never block a swap; undo cannot erase a later edit; open shopping lists follow the swap and done lists flag the week.
 
+### Phase 5b — Long-lasting and fresh shopping
+
+Some groceries are bought monthly (frozen proteins, rice, oils) and others every two weeks (vegetables, dairy). One shopping list can cover both, with each week covered separately per group.
+
+- **Labels.** Every ingredient in `data/ingredients.yml` has `shelf_life: long_lasting | fresh` (required; validated with the other input policies). Initial labels: long-lasting = all proteins (eggs included), arroz, pasta, lentejas, arepa de maíz, maíz tierno, every condiment, fat and spice, queso parmesano, crema de coco; fresh = every vegetable and herb, papa, plátano verde, plátano maduro, yuca, pan, yogurt griego, crema de leche, queso fresco, manzana verde, limón. The UI calls the groups **Long-lasting** and **Fresh**. Labels are read from the current planner inputs, not stored in plan snapshots, so relabeling an ingredient regroups it everywhere (including done lists) without new plan revisions.
+- **Coverage is per (week, group).** A shopping list holds entries `(plan_id, group)`; a week can be on a list for one group or both. A `(week, group)` pair is on at most one list (the old one-list-per-week rule, per group). Typical month: list A = weeks 1–4 long-lasting + weeks 1–2 fresh; list B (mid-month) = weeks 3–4 fresh. Lists created before this change cover both groups for their weeks.
+- **Items.** A list's items are the weekly grocery rows of each covered week whose ingredient is in a covered group, summed as before, each item tagged with its `shelf_life`. Done lists still freeze the revision of each covered week.
+- **Contract changes** (OpenAPI and the publication schema, which reuses `ShoppingTrip`):
+  - `ShelfLife` enum `long_lasting | fresh`.
+  - `ShoppingTripWeek.groups`: non-empty array of `ShelfLife`, order `long_lasting`, `fresh`. One week entry per week with all its groups on that list.
+  - `ShoppingTripItem.shelf_life`: `ShelfLife`.
+  - `CreateShoppingTripRequest.groups` and `AddTripWeekRequest.groups`: optional, default both. Adding a week already on the list with other groups extends its groups. A pair already on another list → the existing conflict error, naming the group.
+  - `DELETE /api/v1/shopping-trips/{trip_id}/weeks/{plan_id}?group=<ShelfLife>` removes one group (the week entry disappears when no group is left); without `group` it removes the week.
+  - `WeekCoverage` becomes `{ plan_id, week_start, week_end, groups: { long_lasting: GroupCoverage, fresh: GroupCoverage } }` with `GroupCoverage = { coverage: CoverageState, trip_id: string|null, changed_since_shopping: bool }`.
+  - Swap trip impact reports every list the swapped week is on, per group.
+- **UI.** Adding weeks to a list (month view) asks what to cover: Everything (default), Long-lasting only, Fresh only. Week coverage shows both groups (e.g. "Long-lasting: covered · Fresh: not covered") in the week and month views. A list shows its items in two groups, Long-lasting then Fresh, each with the existing sections, and per week which groups it covers. The static site shows the same.
+
 ### Phase 6 — Container, publishing, login and NAS operation
 
 Order chosen so every step is testable on the development machine first, and nothing listens on the home LAN before login exists. Target hardware: UGREEN NASync DXP2800 (Intel N100, x86-64, 8 GB RAM, UGOS Pro). Its Docker app deploys Compose files through **Project → Create**; app data lives under `/volume1/docker/meal-prep/`.
@@ -481,6 +498,7 @@ Useful references: [Flask application factories](https://flask.palletsprojects.c
 | Cross-week rules | None (decided) | — |
 | Month generation | Batch of independent weekly plans; no monthly or cross-week rules; existing weeks never overwritten | — |
 | Swaps | Any catalog recipe/variant in a today-or-later slot; preserve unrelated meals; weekly rules are advisory warnings for swaps and undo, enforced for generation; linked pairs swap together unless `scope: single`; no locks, regenerate warns about swapped meals | phase 5 |
+| Shelf-life groups | Ingredients are long-lasting or fresh; shopping lists cover (week, group) pairs so long-lasting can be bought monthly and fresh every two weeks on the same or different lists | phase 5b |
 | Container image | Built by GitHub Actions, pushed to GHCR with build provenance; deployed by digest, verified with `gh attestation verify`; non-root, read-only root filesystem | phase 6a |
 | Publish transport | Home app commits `publication/` + `app-ref` to `meal-plan` `main` over SSH (deploy key); the remote is authoritative and never force-pushed; identical content is a no-op; `live` only after the GitHub Actions run for the pushed commit succeeds; job records private in SQLite | phase 6b |
 | Publish credential | Deploy key with write access to `meal-plan` only; generated on the NAS, mounted as a file, never an env var | phase 6b / 6d |
