@@ -6,12 +6,12 @@
       "week_end": "2026-10-18",
       "groups": {
         "long_lasting": {
-          "coverage": "covered",
+          "coverage": "bought",
           "trip_id": "trip_8a7d6c5b4e3f2a1b0c9d8e7f6a5b4c3d",
           "changed_since_shopping": true
         },
         "fresh": {
-          "coverage": "covered",
+          "coverage": "bought",
           "trip_id": "trip_8a7d6c5b4e3f2a1b0c9d8e7f6a5b4c3d",
           "changed_since_shopping": true
         }
@@ -23,12 +23,12 @@
       "week_end": "2026-10-25",
       "groups": {
         "long_lasting": {
-          "coverage": "on_list",
+          "coverage": "to_buy",
           "trip_id": "trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b",
           "changed_since_shopping": false
         },
         "fresh": {
-          "coverage": "on_list",
+          "coverage": "to_buy",
           "trip_id": "trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b",
           "changed_since_shopping": false
         }
@@ -40,7 +40,7 @@
       "week_end": "2026-11-08",
       "groups": {
         "long_lasting": {
-          "coverage": "on_list",
+          "coverage": "to_buy",
           "trip_id": "trip_5c1e9a7f3b2d4e6f8a0b1c2d3e4f5a6b",
           "changed_since_shopping": false
         },

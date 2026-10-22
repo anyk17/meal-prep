@@ -3,7 +3,7 @@ import { createPlanEditor } from './planEditor.js';
 import { runTripAction } from './tripActions.js';
 import { addDays } from '../readers/shared.js';
 import { formatWeekRange } from '../dates.js';
-import { SHELF_LIVES, addPlan, addableWeeks, addedMessage, chipRemoval, chipState, groupLabel, weekGroupsLabel, weekRemoval } from '../tripModel.js';
+import { addPlan, addableWeeks, addedMessage, groupLabel, weekGroupsLabel, weekRemoval } from '../tripModel.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE_PATH || '/api/v1';
 const btn = 'min-h-11 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
@@ -19,28 +19,8 @@ function Message({ message, onDismiss, info = false }) {
   return <div role={info ? 'status' : 'alert'} className={`rounded-lg border ${tone} px-3 py-2 text-sm flex gap-3 justify-between`}><span>{message}</span><button className="underline shrink-0" onClick={onDismiss}>Dismiss</button></div>;
 }
 
-const chipBase = 'min-h-11 px-3 rounded-lg text-sm font-medium border transition-colors disabled:cursor-not-allowed';
-const chipOn = `${chipBase} bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50`;
-const chipOff = `${chipBase} bg-white dark:bg-slate-950 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50`;
-
-// One group toggle on a week row. ON removes the group, OFF adds it, blocked shows which list has it.
-function GroupChip({ group, chip, removal, busy, onToggle }) {
-  const on = chip.state === 'on';
-  const blocked = chip.state === 'off-blocked' || chip.state === 'off-unknown';
-  const lastBlocked = on && removal.kind === 'blocked';
-  const note = chip.state === 'off-blocked' ? (chip.otherList ? `on '${chip.otherList}'` : 'on another list') : '';
-  return (
-    <span className="inline-flex flex-col items-start">
-      <button type="button" aria-pressed={on} className={on ? chipOn : chipOff} disabled={busy || blocked || lastBlocked} title={lastBlocked ? removal.hint : note || undefined} onClick={onToggle}>
-        {on ? '✓ ' : ''}{groupLabel(group)}
-      </button>
-      {note && <span className="text-[11px] leading-tight text-slate-500 dark:text-slate-400 max-w-[9rem]">{note}</span>}
-    </span>
-  );
-}
-
-// Edit controls for one trip: done/reopen/delete for any trip, add/remove weeks for an open one.
-export default function TripControls({ trip, reader, onTrip, onDeleted }) {
+// Edit controls for one trip: Mark bought (from Shop now), undo a bought cell, delete, add/remove weeks. Works on open and done lists.
+export default function TripControls({ trip, reader, onTrip, onDeleted, selection = null, onMarked, undoCell = null, onUndoClose }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [candidates, setCandidates] = useState([]);
@@ -48,19 +28,16 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
   const [tripNames, setTripNames] = useState(() => new Map());
   const [info, setInfo] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const open = trip.status === 'open';
 
   useEffect(() => {
-    if (!open) return undefined;
     let live = true;
     const from = addDays(trip.weeks[0].week_start, -56), to = addDays(trip.weeks.at(-1).week_end, 112);
     reader.getCoverage({ from, to }).then(result => { if (live) setCandidates(result.items); }).catch(() => { if (live) setCandidates([]); });
     reader.listShoppingTrips().then(result => { if (live) setTripNames(new Map(result.items.map(item => [item.trip_id, item.name]))); }).catch(() => { if (live) setTripNames(new Map()); });
     return () => { live = false; };
-  }, [open, reader, trip]);
+  }, [reader, trip]);
 
   const addable = addableWeeks(candidates, trip);
-  const coverageOf = planId => candidates.find(item => item.plan_id === planId);
   const act = async (action) => {
     setBusy(true); setMessage(''); setInfo('');
     const outcome = await runTripAction(action, { reader, tripId: trip.trip_id });
@@ -68,6 +45,7 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
     if (outcome.deleted || outcome.gone) { if (outcome.message) setMessage(outcome.message); onDeleted(); return; }
     if (outcome.message) setMessage(outcome.message);
     if (outcome.trip) onTrip(outcome.trip);
+    return outcome;
   };
   const addWeek = async () => {
     const item = candidates.find(entry => entry.plan_id === addPlanId);
@@ -83,15 +61,38 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
     if (outcome.trip) onTrip(outcome.trip);
   };
   const deleteTrip = () => { setConfirmingDelete(false); void act(() => getEditor().deleteTrip(trip.trip_id, trip.version)); };
+  const markBought = async () => {
+    const cells = selection;
+    const outcome = await act(() => getEditor().markCellsBought(trip.trip_id, trip.version, cells));
+    if (outcome?.trip && !outcome.message) onMarked?.(cells);
+  };
+  const undo = async () => {
+    const cell = undoCell;
+    onUndoClose?.();
+    await act(() => getEditor().undoCellsBought(trip.trip_id, trip.version, [cell]));
+  };
+  const weekGuard = weekRemoval(trip);
 
   return (
     <div className="space-y-3 border-t border-slate-100 dark:border-slate-800 pt-3" data-testid="trip-controls">
       <Message message={message} onDismiss={() => setMessage('')} />
       <Message info message={info} onDismiss={() => setInfo('')} />
+      {selection && (
+        <div className="space-y-1">
+          <button className={btnPrimary} disabled={busy || selection.length === 0} onClick={markBought}>Mark bought ({selection.length} {selection.length === 1 ? 'cell' : 'cells'})</button>
+          {selection.length === 0 && <p className="text-xs text-slate-500 dark:text-slate-400">Tick at least one week and group above.</p>}
+        </div>
+      )}
+      {undoCell && (
+        <div role="alertdialog" aria-label="Confirm undo" className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm space-y-2 text-amber-900 dark:text-amber-100">
+          <p>Move {groupLabel(undoCell.group)} for {formatWeekRange(undoCell.week_start)} back to To buy?</p>
+          <div className="flex gap-2">
+            <button className={btnPrimary} disabled={busy} onClick={undo}>Yes, move back</button>
+            <button className={btnQuiet} disabled={busy} onClick={onUndoClose}>Cancel</button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
-        {open
-          ? <button className={btnPrimary} disabled={busy} onClick={() => act(() => getEditor().markTripDone(trip.trip_id, trip.version))}>Shopping done</button>
-          : <button className={btnPrimary} disabled={busy} onClick={() => act(() => getEditor().reopenTrip(trip.trip_id, trip.version))}>Reopen</button>}
         {!confirmingDelete && <button className={btnDanger} disabled={busy} onClick={() => setConfirmingDelete(true)}>Delete</button>}
       </div>
       {confirmingDelete && (
@@ -103,45 +104,25 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
           </div>
         </div>
       )}
-      {open && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Edit weeks</h3>
-          <ul className="space-y-2">
-            {trip.weeks.map(week => {
-              const coverage = coverageOf(week.plan_id);
-              const weekGuard = weekRemoval(trip);
-              const remove = group => act(() => getEditor().removeTripWeek(trip.trip_id, week.plan_id, trip.version, group));
-              return (
-                <li key={week.plan_id} className="space-y-1" data-testid="trip-week-edit">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="font-medium">{formatWeekRange(week.week_start)}</span>
-                    <button type="button" className={`${btnQuiet} px-3`} aria-label={`Remove week ${formatWeekRange(week.week_start)}`} title={weekGuard.kind === 'blocked' ? weekGuard.hint : 'Remove week'} disabled={busy || weekGuard.kind === 'blocked'} onClick={() => remove()}>✕</button>
-                  </div>
-                  <div className="flex flex-wrap items-start gap-2">
-                    {SHELF_LIVES.map(group => {
-                      const chip = chipState({ tripWeek: week, coverage, group, tripId: trip.trip_id, tripNames });
-                      const removal = chip.state === 'on' ? chipRemoval(trip, week, group) : { kind: 'none' };
-                      const toggle = () => {
-                        if (chip.state === 'on') { if (removal.kind === 'remove_group') void remove(group); else if (removal.kind === 'remove_week') void remove(); }
-                        else if (chip.state === 'off-free') void act(() => getEditor().addTripWeek(trip.trip_id, week.plan_id, trip.version, [group]));
-                      };
-                      return <GroupChip key={group} group={group} chip={chip} removal={removal} busy={busy} onToggle={toggle} />;
-                    })}
-                  </div>
-                  {trip.weeks.length < 2 && <p className="text-xs text-slate-500 dark:text-slate-400">{weekGuard.hint}</p>}
-                </li>
-              );
-            })}
-          </ul>
-          <div className="flex gap-2">
-            <select aria-label="Week to add" value={addPlanId} onChange={event => setAddPlan(event.target.value)} className="min-h-11 flex-1 min-w-0 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
-              <option value="">{addable.length ? 'Add a week…' : 'No available weeks nearby'}</option>
-              {addable.map(item => <option key={item.plan_id} value={item.plan_id}>{formatWeekRange(item.week_start)}</option>)}
-            </select>
-            <button className={btnQuiet} disabled={busy || !addPlanId} onClick={() => addWeek()}>Add week</button>
-          </div>
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Edit weeks</h3>
+        <ul className="space-y-1">
+          {trip.weeks.map(week => (
+            <li key={week.plan_id} className="flex items-center justify-between gap-2 text-sm" data-testid="trip-week-edit">
+              <span className="font-medium">{formatWeekRange(week.week_start)} <span className="text-slate-500 dark:text-slate-400 font-normal">· {weekGroupsLabel(week.groups)}</span></span>
+              <button type="button" className={`${btnQuiet} px-3`} aria-label={`Remove week ${formatWeekRange(week.week_start)}`} title={weekGuard.kind === 'blocked' ? weekGuard.hint : 'Remove week'} disabled={busy || weekGuard.kind === 'blocked'} onClick={() => act(() => getEditor().removeTripWeek(trip.trip_id, week.plan_id, trip.version))}>✕</button>
+            </li>
+          ))}
+        </ul>
+        {trip.weeks.length < 2 && <p className="text-xs text-slate-500 dark:text-slate-400">{weekGuard.hint}</p>}
+        <div className="flex gap-2">
+          <select aria-label="Week to add" value={addPlanId} onChange={event => setAddPlan(event.target.value)} className="min-h-11 flex-1 min-w-0 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+            <option value="">{addable.length ? 'Add a week…' : 'No available weeks nearby'}</option>
+            {addable.map(item => <option key={item.plan_id} value={item.plan_id}>{formatWeekRange(item.week_start)}</option>)}
+          </select>
+          <button className={btnQuiet} disabled={busy || !addPlanId} onClick={() => addWeek()}>Add week</button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -160,7 +141,7 @@ export function CreateTripBar({ planIds, coverage, reader, onClear, onCreated, o
   useEffect(() => {
     if (!active) return undefined;
     let live = true;
-    reader.listShoppingTrips().then(result => { if (live) setOpenTrips(result.items.filter(trip => trip.status === 'open')); setAllTrips(result.items); }).catch(() => { if (live) { setOpenTrips([]); setAllTrips([]); } });
+    reader.listShoppingTrips().then(result => { if (live) setOpenTrips(result.items); setAllTrips(result.items); }).catch(() => { if (live) { setOpenTrips([]); setAllTrips([]); } });
     return () => { live = false; };
   }, [active, reader]);
 

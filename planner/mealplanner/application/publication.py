@@ -194,7 +194,7 @@ def _check_trips(
     labels: dict[str, str] = {}  # ingredient_id -> shelf_life, as the bundle's trip items show it
     for entry in entries:
         trip = files.get(trip_path(entry["trip_id"]))
-        for item in (trip or {}).get("items") or []:
+        for item in [*((trip or {}).get("items") or []), *((trip or {}).get("bought_items") or [])]:
             known = labels.setdefault(item["ingredient_id"], item.get("shelf_life"))
             if known != item.get("shelf_life"):
                 errors.append(
@@ -211,16 +211,18 @@ def _check_trips(
             continue
         if trip.get("trip_id") != trip_id:
             errors.append(f"trip {trip_id}: file trip_id must match its manifest entry")
-        if (trip.get("status") == trips.DONE) != (trip.get("completed_at") is not None):
-            errors.append(f"trip {trip_id}: completed_at must be set exactly when done")
         weeks = trip.get("weeks") or []
         if not weeks:
             errors.append(f"trip {trip_id}: needs at least one week")
+        all_states: list[str] = []
         for week in weeks:
             plan_id = week["plan_id"]
             groups = week.get("groups") or []
             if not groups or list(groups) != [g for g in trips.GROUPS if g in groups]:
                 errors.append(f"trip {trip_id}: week {plan_id} groups must be a non-empty subset in order {', '.join(trips.GROUPS)}")
+            cells = week.get("cells") or []
+            if [c.get("group") for c in cells] != list(groups):
+                errors.append(f"trip {trip_id}: week {plan_id} cells must match its groups, in order")
             for group in groups:
                 if owner.setdefault((plan_id, group), trip_id) != trip_id:
                     errors.append(
@@ -229,26 +231,54 @@ def _check_trips(
             summary = published.get(plan_id)
             if summary is None:
                 errors.append(f"trip {trip_id}: week {plan_id} has no entry in manifest plans")
-            elif trip.get("status") == trips.OPEN:
-                if (week["revision"], week["snapshot_id"]) != (summary["revision"], summary["snapshot_id"]):
-                    errors.append(f"trip {trip_id}: open week {plan_id} must use the published revision and snapshot_id")
-            elif week["revision"] > summary["revision"]:
-                errors.append(f"trip {trip_id}: done week {plan_id} revision exceeds the published revision")
-        if all(
-            w["plan_id"] in published
-            and shopping_path(w["plan_id"]) in files
-            and w["revision"] == published[w["plan_id"]]["revision"]
-            for w in weeks
-        ):  # items must be the sums of the published shopping lists
+            elif week.get("current_revision") != summary["revision"]:
+                errors.append(f"trip {trip_id}: week {plan_id} current_revision must be the published revision")
+            for cell in cells:
+                all_states.append(cell.get("state"))
+                frozen = (cell.get("bought_at"), cell.get("revision"), cell.get("snapshot_id"))
+                if cell.get("state") == trips.TO_BUY:
+                    if any(v is not None for v in frozen) or cell.get("changed_since_shopping"):
+                        errors.append(f"trip {trip_id}: to-buy cell {plan_id} ({cell.get('group')}) must have no frozen fields")
+                elif any(v is None for v in frozen):
+                    errors.append(f"trip {trip_id}: bought cell {plan_id} ({cell.get('group')}) needs bought_at, revision and snapshot_id")
+                elif summary is not None:
+                    if cell["revision"] > summary["revision"]:
+                        errors.append(f"trip {trip_id}: bought cell {plan_id} revision exceeds the published revision")
+                    if cell["changed_since_shopping"] != (summary["revision"] > cell["revision"]):
+                        errors.append(f"trip {trip_id}: cell {plan_id} ({cell['group']}) changed_since_shopping is wrong")
+        is_done = bool(all_states) and all(st == trips.BOUGHT for st in all_states)
+        if (trip.get("status") == trips.DONE) != is_done:
+            errors.append(f"trip {trip_id}: status must be done exactly when every cell is bought")
+        if (trip.get("completed_at") is not None) != is_done:
+            errors.append(f"trip {trip_id}: completed_at must be set exactly when done")
+        if all(w["plan_id"] in published and shopping_path(w["plan_id"]) in files for w in weeks):
+            # to-buy items are the sums of the published (current) shopping lists
             expected = trips.sum_items(
-                [(w["plan_id"], files[shopping_path(w["plan_id"])], w.get("groups") or []) for w in weeks],
+                trips.merge_cells(
+                    (w["plan_id"], None, files[shopping_path(w["plan_id"])], c["group"])
+                    for w in weeks
+                    for c in w["cells"]
+                    if c["state"] == trips.TO_BUY
+                ),
                 labels,
                 skip_unlabeled=True,
             )
             if trip.get("items") != expected:
                 errors.append(
-                    f"trip {trip_id}: items must equal the sum of the covered groups' rows of the weeks' shopping lists"
+                    f"trip {trip_id}: items must equal the sum of the to-buy cells' rows of the weeks' shopping lists"
                 )
+            bought_cells = [(w, c) for w in weeks for c in w["cells"] if c["state"] == trips.BOUGHT]
+            if all(c["revision"] == published[w["plan_id"]]["revision"] for w, c in bought_cells):
+                expected_bought = trips.sum_items(
+                    trips.merge_cells(
+                        (w["plan_id"], c["revision"], files[shopping_path(w["plan_id"])], c["group"])
+                        for w, c in bought_cells
+                    ),
+                    labels,
+                    skip_unlabeled=True,
+                )
+                if trip.get("bought_items") != expected_bought:
+                    errors.append(f"trip {trip_id}: bought_items must equal the sum of the bought cells' rows")
     return errors
 
 

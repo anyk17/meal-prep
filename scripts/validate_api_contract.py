@@ -51,6 +51,8 @@ EXPECTED_PATHS = {
     "/api/v1/shopping-trips/{trip_id}": {"get", "delete"},
     "/api/v1/shopping-trips/{trip_id}/weeks": {"post"},
     "/api/v1/shopping-trips/{trip_id}/weeks/{plan_id}": {"delete"},
+    "/api/v1/shopping-trips/{trip_id}/purchases": {"post"},
+    "/api/v1/shopping-trips/{trip_id}/purchases/undo": {"post"},
     "/api/v1/shopping-trips/{trip_id}/done": {"post"},
     "/api/v1/shopping-trips/{trip_id}/reopen": {"post"},
     "/api/v1/coverage": {"get"},
@@ -775,6 +777,12 @@ def self_test_contract(spec):
         "open trip done body": lambda d: d["components"]["schemas"][
             "ExpectedVersionRequest"
         ].__setitem__("additionalProperties", True),
+        "open purchases body": lambda d: d["components"]["schemas"][
+            "PurchasesRequest"
+        ].__setitem__("additionalProperties", True),
+        "missing purchases 403": lambda d: d["paths"][
+            "/api/v1/shopping-trips/{trip_id}/purchases/undo"
+        ]["post"]["responses"].pop("403"),
         "missing 403": lambda d: d["paths"]["/api/v1/plans/{plan_id}/undo"]["post"][
             "responses"
         ].pop("403"),

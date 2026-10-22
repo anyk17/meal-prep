@@ -211,7 +211,10 @@ def test_preview_lists_each_trip_with_its_groups_and_limits_extra_needed(client,
     for t in (ll, fresh):
         ok(client.post(f"/api/v1/shopping-trips/{t['trip_id']}/done", json={"expected_version": 1}), 200, "ShoppingTrip")
     trips = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trips"]
-    assert {t["trip_id"]: t["groups"] for t in trips} == {ll["trip_id"]: ["long_lasting"], fresh["trip_id"]: ["fresh"]}
+    assert {t["trip_id"]: t["groups"] for t in trips} == {
+        ll["trip_id"]: [{"group": "long_lasting", "state": "bought"}],
+        fresh["trip_id"]: [{"group": "fresh", "state": "bought"}],
+    }
     extra = {t["trip_id"]: {r["ingredient_id"] for r in t["extra_needed"]} for t in trips}
     labels = {i["ingredient_id"]: i["shelf_life"] for t in (ll, fresh) for i in t["items"]}
     assert all(labels.get(i, "long_lasting") == "long_lasting" for i in extra[ll["trip_id"]])

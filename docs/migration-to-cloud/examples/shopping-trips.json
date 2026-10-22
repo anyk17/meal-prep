@@ -13,28 +13,56 @@
           "plan_id": "plan_2026_10_19",
           "week_start": "2026-10-19",
           "week_end": "2026-10-25",
-          "revision": 1,
-          "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
           "current_revision": 1,
-          "coverage": "on_list",
-          "changed_since_shopping": false,
           "groups": [
             "long_lasting",
             "fresh"
+          ],
+          "cells": [
+            {
+              "group": "long_lasting",
+              "state": "to_buy",
+              "bought_at": null,
+              "revision": null,
+              "snapshot_id": null,
+              "changed_since_shopping": false
+            },
+            {
+              "group": "fresh",
+              "state": "to_buy",
+              "bought_at": null,
+              "revision": null,
+              "snapshot_id": null,
+              "changed_since_shopping": false
+            }
           ]
         },
         {
           "plan_id": "plan_2026_10_26",
           "week_start": "2026-10-26",
           "week_end": "2026-11-01",
-          "revision": 1,
-          "snapshot_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "current_revision": 1,
-          "coverage": "on_list",
-          "changed_since_shopping": false,
           "groups": [
             "long_lasting",
             "fresh"
+          ],
+          "cells": [
+            {
+              "group": "long_lasting",
+              "state": "to_buy",
+              "bought_at": null,
+              "revision": null,
+              "snapshot_id": null,
+              "changed_since_shopping": false
+            },
+            {
+              "group": "fresh",
+              "state": "to_buy",
+              "bought_at": null,
+              "revision": null,
+              "snapshot_id": null,
+              "changed_since_shopping": false
+            }
           ]
         }
       ],
@@ -49,7 +77,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 540.0,
+            "plan_2026_10_26": 540.0
+          }
         },
         {
           "ingredient_id": "sausage",
@@ -61,7 +93,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 247.5,
+            "plan_2026_10_26": 247.5
+          }
         },
         {
           "ingredient_id": "fish_salmon",
@@ -73,7 +109,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 75.0,
+            "plan_2026_10_26": 75.0
+          }
         },
         {
           "ingredient_id": "fish_tuna_fillet",
@@ -85,7 +125,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 210.0,
+            "plan_2026_10_26": 210.0
+          }
         },
         {
           "ingredient_id": "beef",
@@ -97,7 +141,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 285.0,
+            "plan_2026_10_26": 285.0
+          }
         },
         {
           "ingredient_id": "fish_tuna_canned",
@@ -109,7 +157,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 75.0,
+            "plan_2026_10_26": 75.0
+          }
         },
         {
           "ingredient_id": "cherry_tomato",
@@ -121,7 +173,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 150.0,
+            "plan_2026_10_26": 150.0
+          }
         },
         {
           "ingredient_id": "spinach",
@@ -133,7 +189,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 120.0,
+            "plan_2026_10_26": 120.0
+          }
         },
         {
           "ingredient_id": "carrot",
@@ -145,7 +205,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 240.0,
+            "plan_2026_10_26": 240.0
+          }
         },
         {
           "ingredient_id": "tomato",
@@ -157,7 +221,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 277.5,
+            "plan_2026_10_26": 277.5
+          }
         },
         {
           "ingredient_id": "asparagus",
@@ -169,7 +237,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 277.5,
+            "plan_2026_10_26": 277.5
+          }
         },
         {
           "ingredient_id": "ginger",
@@ -181,7 +253,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 22.5,
+            "plan_2026_10_26": 22.5
+          }
         },
         {
           "ingredient_id": "green_beans",
@@ -193,7 +269,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 127.5,
+            "plan_2026_10_26": 127.5
+          }
         },
         {
           "ingredient_id": "broccoli",
@@ -205,7 +285,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 300.0,
+            "plan_2026_10_26": 300.0
+          }
         },
         {
           "ingredient_id": "bell_pepper",
@@ -217,7 +301,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 225.0,
+            "plan_2026_10_26": 225.0
+          }
         },
         {
           "ingredient_id": "peas",
@@ -229,7 +317,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 37.5,
+            "plan_2026_10_26": 37.5
+          }
         },
         {
           "ingredient_id": "olives",
@@ -241,7 +333,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 45.0,
+            "plan_2026_10_26": 45.0
+          }
         },
         {
           "ingredient_id": "tomato_sauce",
@@ -253,7 +349,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 37.5,
+            "plan_2026_10_26": 37.5
+          }
         },
         {
           "ingredient_id": "achiote",
@@ -265,7 +365,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 3.75,
+            "plan_2026_10_26": 3.75
+          }
         },
         {
           "ingredient_id": "greek_yogurt",
@@ -277,7 +381,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 75.0,
+            "plan_2026_10_26": 75.0
+          }
         },
         {
           "ingredient_id": "yuca",
@@ -289,7 +397,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 52.5,
+            "plan_2026_10_26": 52.5
+          }
         },
         {
           "ingredient_id": "lentils",
@@ -301,7 +413,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 41.25,
+            "plan_2026_10_26": 41.25
+          }
         },
         {
           "ingredient_id": "rice",
@@ -313,7 +429,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 60.0,
+            "plan_2026_10_26": 60.0
+          }
         },
         {
           "ingredient_id": "platano_verde",
@@ -325,7 +445,11 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 75.0,
+            "plan_2026_10_26": 75.0
+          }
         },
         {
           "ingredient_id": "sesame_seeds",
@@ -337,9 +461,14 @@
           "plan_ids": [
             "plan_2026_10_19",
             "plan_2026_10_26"
-          ]
+          ],
+          "quantity_by_plan": {
+            "plan_2026_10_19": 11.25,
+            "plan_2026_10_26": 11.25
+          }
         }
-      ]
+      ],
+      "bought_items": []
     }
   ]
 }

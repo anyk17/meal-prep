@@ -1,7 +1,0 @@
-{
-  "error": {
-    "code": "trip_not_done",
-    "message": "This shopping list is not in the state this action needs.",
-    "details": []
-  }
-}

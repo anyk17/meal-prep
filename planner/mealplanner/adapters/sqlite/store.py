@@ -24,6 +24,7 @@ from ...domain.planner_inputs import PlannerInputs
 from ...domain.shopping_trip import (
     ShoppingTrip,
     StaleVersion,
+    TripCell,
     TripNotFound,
     TripWeek,
     WeekAlreadyOnTrip,
@@ -323,12 +324,14 @@ class SqlitePlanRepository:
 
 def _insert_trip_weeks(conn: sqlite3.Connection, trip: ShoppingTrip) -> None:
     conn.executemany(
-        "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group, covered_revision,"
-        " covered_snapshot_id) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group, state, bought_at,"
+        " revision, snapshot_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            (trip.trip_id, w.plan_id, group, w.covered_revision, w.covered_snapshot_id)
-            for w in trip.weeks
-            for group in w.groups
+            (
+                trip.trip_id, w.plan_id, c.group, c.state,
+                _dt(c.bought_at) if c.bought_at else None, c.revision, c.snapshot_id,
+            )
+            for w, c in trip.all_cells
         ],
     )
 
@@ -337,7 +340,8 @@ def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> l
     trips = []
     for row in rows:
         members = conn.execute(
-            "SELECT w.plan_id, p.week_start, w.shelf_group, w.covered_revision, w.covered_snapshot_id"
+            "SELECT w.plan_id, p.week_start, w.shelf_group, w.state, w.bought_at, w.revision,"
+            " w.snapshot_id"
             " FROM shopping_trip_weeks w JOIN plans p ON p.plan_id = w.plan_id"
             " WHERE w.trip_id = ? ORDER BY p.week_start, w.plan_id",
             (row["trip_id"],),
@@ -349,20 +353,23 @@ def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> l
             ShoppingTrip(
                 trip_id=row["trip_id"],
                 name=row["name"] if row["name_is_custom"] else None,
-                status=row["status"],
                 version=row["version"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
-                completed_at=(
-                    datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
-                ),
                 weeks=tuple(
                     TripWeek(
                         plan_id,
                         date.fromisoformat(group_rows[0]["week_start"]),
-                        group_rows[0]["covered_revision"],
-                        group_rows[0]["covered_snapshot_id"],
-                        tuple(g["shelf_group"] for g in group_rows),
+                        cells=tuple(
+                            TripCell(
+                                g["shelf_group"],
+                                g["state"],
+                                datetime.fromisoformat(g["bought_at"]) if g["bought_at"] else None,
+                                g["revision"],
+                                g["snapshot_id"],
+                            )
+                            for g in group_rows
+                        ),
                     )
                     for plan_id, group_rows in by_plan.items()
                 ),
@@ -375,7 +382,8 @@ class SqliteShoppingTripRepository:
     """ShoppingTripRepository backed by SQLite (migrated on construction).
 
     UNIQUE(plan_id, shelf_group) on shopping_trip_weeks enforces one trip per (week, group);
-    foreign keys tie weeks to plans (and covered revisions to immutable plan_revisions rows).
+    foreign keys tie weeks to plans (and bought revisions to immutable plan_revisions rows).
+    The shopping_trips status/completed_at columns are written from the derived values.
     """
 
     def __init__(self, db_path: Path | str) -> None:

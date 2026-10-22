@@ -4,8 +4,8 @@ import { COVERAGE_LABEL, SHELF_LIVES, coverageSummary, decorateCoverage, groupLa
 
 const STYLE = {
   not_covered: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-  on_list: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200',
-  covered: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  to_buy: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200',
+  bought: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 
 // A decorated WeekCoverage entry ({ groups: { long_lasting: { coverage, trip_id, changed_since_shopping, trip_name }, fresh: {...} } });
@@ -19,7 +19,7 @@ function GroupPill({ group, entry, onOpenTrip }) {
       {entry.trip_id && onOpenTrip ? (
         <button type="button" onClick={() => onOpenTrip(entry.trip_id)} title={`Open ${title}`} className={cn(base, 'hover:underline min-h-6')}>{label}</button>
       ) : <span className={base} title={title}>{label}</span>}
-      {entry.changed_since_shopping && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" title="The plan was edited after this list was marked done">{groupLabel(group)} changed since shopping</span>}
+      {entry.changed_since_shopping && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" title="The plan was edited after this list was marked bought">{groupLabel(group)} changed since shopping</span>}
     </span>
   );
 }

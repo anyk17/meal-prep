@@ -1,7 +1,7 @@
 // Write client for the home (API-mode) deployment only. It is deliberately separate from the
 // read-only reader interface and is only ever imported through a dynamic import that the static
 // (GitHub Pages) build removes.
-import { createTripBody, addWeekBody, removeWeekPath } from '../tripModel.js';
+import { createTripBody, addWeekBody, removeWeekPath, purchaseBody } from '../tripModel.js';
 import { ReaderError, normalizeError, validatePair, validateTrip } from '../readers/shared.js';
 import { notifyIfUnauthenticated } from '../auth/authStore.js';
 
@@ -43,6 +43,14 @@ export function createPlanEditor(base = '/api/v1') {
   // One Idempotency-Key per user action. The key is kept while the outcome is unknown (network
   // failure, proxy error, 503) so a retry of the same action replays instead of repeating it.
   const pendingKeys = new Map();
+
+  async function purchase(tripId, expectedVersion, cells, action) {
+    requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
+    let body;
+    try { body = purchaseBody(expectedVersion, cells); } catch (error) { throw new ReaderError('invalid_request', error.message); }
+    body.cells.forEach(cell => requireId(cell.plan_id, 'plan identity'));
+    return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/${action}`, { body }), tripId);
+  }
 
   async function request(method, endpoint, { body, idempotencyAction } = {}) {
     const headers = { Accept: 'application/json' };
@@ -158,6 +166,9 @@ export function createPlanEditor(base = '/api/v1') {
       requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
       return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/reopen`, { body: { expected_version: expectedVersion } }), tripId);
     },
+    // Mark cells [{plan_id, group}] bought, or return them to to-buy (undo). Both carry the trip version.
+    async markCellsBought(tripId, expectedVersion, cells) { return purchase(tripId, expectedVersion, cells, 'purchases'); },
+    async undoCellsBought(tripId, expectedVersion, cells) { return purchase(tripId, expectedVersion, cells, 'purchases/undo'); },
     async deleteTrip(tripId, expectedVersion) {
       requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);
       await request('DELETE', `/shopping-trips/${encodeURIComponent(tripId)}?expected_version=${expectedVersion}`);

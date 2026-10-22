@@ -45,7 +45,7 @@ export function formatQuantity(value, unit) {
   return unit === 'units' ? `${text} ${rounded === 1 ? 'unit' : 'units'}` : `${text} ${unit}`;
 }
 
-export const COVERAGE_LABEL = { not_covered: 'Not covered', on_list: 'On a list', covered: 'Covered' };
+export const COVERAGE_LABEL = { not_covered: 'Not covered', to_buy: 'To buy', bought: 'Bought' };
 
 // ---- Long-lasting / fresh groups (phase 5b) ----
 export const SHELF_LIVES = ['long_lasting', 'fresh'];
@@ -99,27 +99,8 @@ export function addedMessage(weekLabel, groups, skipped = []) {
   return `Added ${weekLabel} (${weekGroupsLabel(groups)} — ${skipped.map(skip => `${groupLabel(skip.group)} is ${listText(skip)}`).join(', ')})`;
 }
 
-// Edit-chip state for one group of a week already on `tripId`:
-//   on: the group is on this list; off-free: nobody has it (can be added);
-//   off-blocked: another list has it (otherList = its name or null); off-unknown: no coverage info yet.
-export function chipState({ tripWeek, coverage, group, tripId, tripNames }) {
-  if (tripWeek?.groups?.includes(group)) return { state: 'on', otherList: null };
-  const entry = coverage?.groups?.[group];
-  if (!entry) return { state: 'off-unknown', otherList: null };
-  if (entry.coverage === 'not_covered') return { state: 'off-free', otherList: null };
-  if (entry.trip_id === tripId) return { state: 'on', otherList: null };
-  return { state: 'off-blocked', otherList: otherListName(coverage, group, tripNames) };
-}
-
 export const LAST_WEEK_HINT = 'A list needs at least one week. Delete it instead.';
 
-// What tapping an ON chip does: drop just that group, or the whole week when it is the week's only group.
-// Dropping the last group of the last week would empty the list, so that is blocked.
-export function chipRemoval(trip, tripWeek, group) {
-  const only = tripWeek.groups.length < 2 || !tripWeek.groups.includes(group);
-  if (only && trip.weeks.length < 2) return { kind: 'blocked', hint: LAST_WEEK_HINT };
-  return only ? { kind: 'remove_week' } : { kind: 'remove_group', group };
-}
 // The week's ✕ button: removing the only week is blocked.
 export const weekRemoval = trip => (trip.weeks.length < 2 ? { kind: 'blocked', hint: LAST_WEEK_HINT } : { kind: 'remove_week' });
 
@@ -158,7 +139,8 @@ export function swapImpactEntries(impact) {
   for (const entry of list) {
     if (!entry) continue;
     const key = entry.trip_id ?? entry.name;
-    const groups = entry.groups ?? (entry.group ? [entry.group] : entry.shelf_life ? [entry.shelf_life] : []);
+    // Groups arrive as names or as cells ({group, state}).
+    const groups = (entry.groups ?? (entry.group ? [entry.group] : entry.shelf_life ? [entry.shelf_life] : [])).map(group => (typeof group === 'string' ? group : group?.group));
     const known = byTrip.get(key);
     if (!known) byTrip.set(key, { ...entry, groups: [...groups], extra_needed: [...(entry.extra_needed ?? [])] });
     else {
@@ -177,3 +159,64 @@ export function decorateCoverage(entry, trips) {
   return { ...entry, groups: Object.fromEntries(SHELF_LIVES.map(group => [group, { ...entry.groups[group], trip_name: names.get(entry.groups[group].trip_id) ?? null }])) };
 }
 
+
+// ---- Cells: a (week, group) on a list is to_buy or bought (phase 5c) ----
+export const CELL_STATES = ['to_buy', 'bought'];
+export const cellKey = (planId, group) => `${planId}|${group}`;
+export const cellStateLabel = state => COVERAGE_LABEL[state] ?? String(state);
+
+// The cell of one group in a trip week, or null.
+export const cellOf = (week, group) => week?.cells?.find(cell => cell.group === group) ?? null;
+export const cellAt = (trip, planId, group) => cellOf(trip?.weeks?.find(week => week.plan_id === planId), group);
+
+// Every cell of a trip, weeks in order and groups long_lasting then fresh, each with its week identity and a stable key.
+export function tripCells(trip) {
+  return (trip?.weeks ?? []).flatMap(week => (week.cells ?? []).map(cell => ({ ...cell, plan_id: week.plan_id, week_start: week.week_start, week_end: week.week_end, current_revision: week.current_revision, key: cellKey(week.plan_id, cell.group) })));
+}
+export const toBuyCells = trip => tripCells(trip).filter(cell => cell.state === 'to_buy');
+export const boughtCells = trip => tripCells(trip).filter(cell => cell.state === 'bought');
+export const weekChanged = week => (week?.cells ?? []).some(cell => cell.changed_since_shopping);
+export const tripChanged = trip => (trip?.weeks ?? []).some(weekChanged);
+export const nothingToBuy = trip => toBuyCells(trip).length === 0;
+
+// "Long-lasting: bought · Fresh: to buy" for the groups of one trip week.
+export function cellsSummary(week) {
+  return (week?.cells ?? []).map(cell => `${groupLabel(cell.group)}: ${cellStateLabel(cell.state).toLowerCase()}`).join(' · ');
+}
+
+// Sum quantity_by_plan over the ticked cells of the item's own group. Items with nothing left are dropped.
+// `selected` is a Set (or array) of cell keys; the result keeps the item shape with `quantity` replaced.
+export function totalsForCells(items, selected) {
+  const keys = selected instanceof Set ? selected : new Set(selected ?? []);
+  const out = [];
+  for (const item of items ?? []) {
+    let quantity = 0;
+    for (const [planId, value] of Object.entries(item.quantity_by_plan ?? {})) if (keys.has(cellKey(planId, item.shelf_life))) quantity += value;
+    if (quantity > 0) out.push({ ...item, quantity: Math.round(quantity * 1e6) / 1e6 });
+  }
+  return out;
+}
+
+// Which to-buy cells are ticked. Only the UNticked keys are stored, so the default is "everything" and new cells come ticked.
+export const selectionStorageKey = (mode, trip) => `trip_cells:${mode}:${trip.trip_id}`;
+export function readUnselected(storageKey) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter(value => typeof value === 'string') : [];
+  } catch { return []; }
+}
+export function writeUnselected(storageKey, keys) {
+  try { window.localStorage.setItem(storageKey, JSON.stringify([...keys])); } catch { /* browser storage may be disabled */ }
+}
+// Ticked = to-buy cells not in the unticked list. Returns the cells in trip order.
+export const selectedCells = (trip, unselected) => { const off = new Set(unselected); return toBuyCells(trip).filter(cell => !off.has(cell.key)); };
+export function toggleUnselected(unselected, key) { const set = new Set(unselected); if (set.has(key)) set.delete(key); else set.add(key); return [...set]; }
+
+// Short text for a cell/group set: "Nov 2 – Nov 8 · Fresh".
+export const cellLabel = (cell, formatWeek) => `${formatWeek(cell.week_start)} · ${groupLabel(cell.group)}`;
+
+// Body for POST .../purchases and .../purchases/undo.
+export function purchaseBody(expectedVersion, cells) {
+  if (!Array.isArray(cells) || !cells.length) throw new Error('Choose at least one week and group.');
+  return { expected_version: expectedVersion, cells: cells.map(cell => ({ plan_id: cell.plan_id, group: cell.group })) };
+}

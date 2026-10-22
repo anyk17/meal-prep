@@ -64,7 +64,7 @@ export function createStaticReader(indexPath = 'publication/index.json', baseUrl
         const planEntry = entries.get(week.plan_id);
         if (!planEntry) fail(`Shopping trip ${tripId} covers a week that is not published`);
         if (planEntry.summary.week_start !== week.week_start || planEntry.summary.week_end !== week.week_end) fail(`Shopping trip ${tripId} disagrees with the published plan dates`);
-        if (trip.status === 'open' && (week.revision !== planEntry.summary.revision || week.snapshot_id !== planEntry.summary.snapshot_id || week.current_revision !== planEntry.summary.revision)) fail(`Open shopping trip ${tripId} is not coherent with the published plan`);
+        if (week.cells.some(cell => cell.state === 'to_buy' && (week.current_revision !== planEntry.summary.revision || (cell.snapshot_id !== null && cell.snapshot_id !== planEntry.summary.snapshot_id)))) fail(`Shopping trip ${tripId} has a to-buy week that is not coherent with the published plan`);
         for (const group of week.groups) {
           if (tripWeeks.has(`${week.plan_id}|${group}`)) fail('A published week is on more than one shopping trip');
           tripWeeks.add(`${week.plan_id}|${group}`);

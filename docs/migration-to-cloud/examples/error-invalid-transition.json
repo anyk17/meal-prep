@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_transition",
+    "message": "A selected week and group is already in that state.",
+    "details": []
+  }
+}

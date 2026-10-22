@@ -26,8 +26,7 @@ TRIP_ERROR_MAP: list[tuple[type[Exception], int, str]] = [
     (trips.StaleVersion, 409, "stale_version"),
     (trips.TripNotFound, 404, "trip_not_found"),
     (trips.WeekAlreadyOnTrip, 409, "week_already_on_trip"),
-    (trips.TripDone, 409, "trip_done"),
-    (trips.TripNotDone, 409, "trip_not_done"),
+    (trips.InvalidTransition, 409, "invalid_transition"),
     (trips.WeekNotOnTrip, 404, "week_not_on_trip"),
     (trips.LastWeek, 409, "last_week"),
     (trips.InvalidTrip, 400, "invalid_request"),
@@ -37,8 +36,7 @@ MESSAGES = {
     "stale_version": "The shopping list changed since you loaded it. Refetch and try again.",
     "trip_not_found": "No shopping list exists for the requested trip_id.",
     "week_already_on_trip": "A week can be on only one shopping list for each group. Remove it from the other list first.",
-    "trip_done": "This shopping list is done. Reopen it to change its weeks.",
-    "trip_not_done": "This shopping list is not in the state this action needs.",
+    "invalid_transition": "A selected week and group is already in that state.",
     "week_not_on_trip": "That week is not on this shopping list.",
     "last_week": "A shopping list needs at least one week. Delete the list instead.",
 }
@@ -98,6 +96,25 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
         ):
             raise BodyError("groups", f"groups must list each of {', '.join(trips.GROUPS)} at most once")
         return groups
+
+    def cells_field(body: dict[str, Any]) -> list[tuple[str, str]]:
+        cells = body.get("cells")
+        if not isinstance(cells, list) or not 1 <= len(cells) <= MAX_TRIP_WEEKS * len(trips.GROUPS):
+            raise BodyError("cells", "cells must list 1 or more {plan_id, group} objects")
+        refs: list[tuple[str, str]] = []
+        for cell in cells:
+            if (
+                not isinstance(cell, dict)
+                or set(cell) != {"plan_id", "group"}
+                or not isinstance(cell["plan_id"], str)
+                or not ID_PATTERN.fullmatch(cell["plan_id"])
+                or cell["group"] not in trips.GROUPS
+            ):
+                raise BodyError("cells", f"each cell needs a plan_id and a group of {', '.join(trips.GROUPS)}")
+            refs.append((cell["plan_id"], cell["group"]))
+        if len(set(refs)) != len(refs):
+            raise BodyError("cells", "cells must be unique")
+        return refs
 
     def mapped(fn: Callable[[], Any]):
         try:
@@ -269,6 +286,31 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
 
         return run_action
 
+    def purchases_action(name: str):
+        def run_action(trip_id: str):
+            denied = guard() or check_id("trip_id", trip_id)
+            if denied:
+                return denied
+
+            def run():
+                body = _parse_body({"expected_version", "cells"})
+                expected = _int_field(
+                    body, "expected_version", required=True, low=1, high=MAX_REVISION
+                )
+                return jsonify(getattr(service(), name)(trip_id, cells_field(body), expected))
+
+            return mapped(run)
+
+        return run_action
+
+    app.add_url_rule(
+        "/api/v1/shopping-trips/<trip_id>/purchases", "mark_trip_purchases",
+        purchases_action("mark_purchases"), methods=["POST"],
+    )
+    app.add_url_rule(
+        "/api/v1/shopping-trips/<trip_id>/purchases/undo", "unmark_trip_purchases",
+        purchases_action("unmark_purchases"), methods=["POST"],
+    )
     app.add_url_rule(
         "/api/v1/shopping-trips/<trip_id>/done", "mark_trip_done", version_action("mark_done"),
         methods=["POST"],

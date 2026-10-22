@@ -262,6 +262,48 @@ MIGRATIONS: tuple[tuple[int, str, tuple[Step, ...]], ...] = (
             "ALTER TABLE shopping_trip_weeks_v6 RENAME TO shopping_trip_weeks",
         ),
     ),
+    (
+        7,
+        "shopping list cells: bought state per (week, group)",
+        (
+            # Each (week, group) cell is to_buy or bought; a bought cell freezes the revision and
+            # snapshot it was bought at. Cells of done lists become bought with the list's frozen
+            # revision and completed_at; cells of open lists become to_buy. shopping_trips keeps
+            # status/completed_at, now written from the cells (never a source of truth).
+            """CREATE TABLE shopping_trip_weeks_v7 (
+                trip_id TEXT NOT NULL REFERENCES shopping_trips (trip_id) ON DELETE CASCADE,
+                plan_id TEXT NOT NULL REFERENCES plans (plan_id),
+                shelf_group TEXT NOT NULL CHECK (shelf_group IN ('long_lasting', 'fresh')),
+                state TEXT NOT NULL CHECK (state IN ('to_buy', 'bought')),
+                bought_at TEXT,
+                revision INTEGER,
+                snapshot_id TEXT,
+                PRIMARY KEY (trip_id, plan_id, shelf_group),
+                UNIQUE (plan_id, shelf_group),
+                CHECK ((state = 'bought') = (bought_at IS NOT NULL)),
+                CHECK ((state = 'bought') = (revision IS NOT NULL)),
+                CHECK ((state = 'bought') = (snapshot_id IS NOT NULL)),
+                FOREIGN KEY (plan_id, revision)
+                    REFERENCES plan_revisions (plan_id, revision)
+            )""",
+            # A done list normally has covered_* on every week; if one is missing (it should not
+            # be), fall back to the plan's current revision so no data is lost.
+            """INSERT INTO shopping_trip_weeks_v7
+                   (trip_id, plan_id, shelf_group, state, bought_at, revision, snapshot_id)
+               SELECT w.trip_id, w.plan_id, w.shelf_group,
+                      CASE WHEN t.status = 'done' THEN 'bought' ELSE 'to_buy' END,
+                      CASE WHEN t.status = 'done' THEN COALESCE(t.completed_at, t.updated_at) END,
+                      CASE WHEN t.status = 'done' THEN COALESCE(w.covered_revision, p.current_revision) END,
+                      CASE WHEN t.status = 'done' THEN COALESCE(w.covered_snapshot_id, r.snapshot_id) END
+               FROM shopping_trip_weeks w
+               JOIN shopping_trips t ON t.trip_id = w.trip_id
+               JOIN plans p ON p.plan_id = w.plan_id
+               JOIN plan_revisions r
+                 ON r.plan_id = w.plan_id AND r.revision = COALESCE(w.covered_revision, p.current_revision)""",
+            "DROP TABLE shopping_trip_weeks",
+            "ALTER TABLE shopping_trip_weeks_v7 RENAME TO shopping_trip_weeks",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

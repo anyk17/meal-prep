@@ -1123,7 +1123,7 @@ paths:
       operationId: listShoppingTrips
       summary: List shopping trips
       description: |-
-        Every shopping trip (shown to users as a "shopping list"), oldest first, each with its weeks and derived items. Open trips follow the weeks' current revisions; done trips are frozen to the revisions they covered. When the API is not SQLite-backed the list is empty.
+        Every shopping trip (shown to users as a "shopping list"), oldest first, each with its weeks (a to_buy/bought cell per group) and derived items: items are the to-buy totals at the plans' current revisions, bought_items the bought cells at their frozen revisions. When the API is not SQLite-backed the list is empty.
       responses:
         '200':
           description: Shopping trips, possibly an empty list.
@@ -1198,7 +1198,7 @@ paths:
       operationId: getShoppingTrip
       summary: Read one shopping trip
       description: |-
-        Returns the trip with its weeks (coverage, used and current revision) and derived items: the sum, per ingredient and unit, of each covered week's saved grocery rows, with the contributing plan_ids. Items are never stored or edited and there is no pantry or purchase tracking. Item checkboxes are device-local and not part of this resource.
+        Returns the trip with its weeks (one cell per group: state, bought_at, frozen revision/snapshot_id, changed_since_shopping) and derived totals: items (to-buy cells at the current revisions) and bought_items (bought cells at their frozen revisions), each the sum, per ingredient and unit, of the weeks' saved grocery rows with plan_ids and quantity_by_plan. Totals are never stored or edited. status is derived (done when every cell is bought). Item checkboxes are device-local and not part of this resource.
       parameters:
         - $ref: '#/components/parameters/TripId'
       responses:
@@ -1261,9 +1261,9 @@ paths:
     post:
       tags: [Shopping trips]
       operationId: addShoppingTripWeek
-      summary: Add a week to an open trip
+      summary: Add a week to a trip
       description: |-
-        Adds a plan's week to an open trip for the given groups (default both). A week already on the trip gains the groups it lacks; if it has all of them the request is a 409 week_already_on_trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when one of the (plan, group) pairs is already on another trip (details name the group). Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Adds a plan's week to a trip in any state for the given groups (default both); the new cells are to_buy, so a done list becomes open. A week already on the trip gains the groups it lacks; if it has all of them the request is a 409 week_already_on_trip. 409 week_already_on_trip when one of the (plan, group) pairs is already on another trip (details name the group). Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1306,9 +1306,9 @@ paths:
     delete:
       tags: [Shopping trips]
       operationId: removeShoppingTripWeek
-      summary: Remove a week from an open trip
+      summary: Remove a week from a trip
       description: |-
-        Removes the plan's week from an open trip, or with the group query parameter only that group of it (the week entry disappears when no group is left). 409 trip_done on a done trip (reopen it first), 409 last_week when nothing else would remain (delete the trip instead), 404 week_not_on_trip when the plan, or the requested group of it, is not on this trip. An unknown group is 400 invalid_request. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Removes the plan's week from a trip in any state, or with the group query parameter only that group of it (the week entry disappears when no group is left). 409 last_week when nothing else would remain (delete the trip instead), 404 week_not_on_trip when the plan, or the requested group of it, is not on this trip. An unknown group is 400 invalid_request. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
         - $ref: '#/components/parameters/PlanId'
@@ -1343,13 +1343,103 @@ paths:
           $ref: '#/components/responses/TripOrPlanNotFound'
         '409':
           $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/purchases:
+    post:
+      tags: [Shopping trips]
+      operationId: markShoppingTripPurchases
+      summary: Mark cells bought
+      description: |-
+        Marks the given (plan_id, group) cells bought, freezing each week's current revision and snapshot_id and recording bought_at. All or nothing. 404 week_not_on_trip when a cell is not on the trip, 409 invalid_transition when a cell is already bought, 409 stale_version. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        description: The trip version the client is looking at and the cells to mark.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchasesRequest'
+      security:
+        - cookieAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '200':
+          description: The updated trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                partial:
+                  summary: Week 1 long-lasting bought
+                  externalValue: examples/shopping-trip-partial.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripOrPlanNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
+  /api/v1/shopping-trips/{trip_id}/purchases/undo:
+    post:
+      tags: [Shopping trips]
+      operationId: unmarkShoppingTripPurchases
+      summary: Return cells to to-buy
+      description: |-
+        Returns the given bought cells to to_buy (current revision again; the frozen revision is dropped). All or nothing. 404 week_not_on_trip when a cell is not on the trip, 409 invalid_transition when a cell is already to buy, 409 stale_version. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        description: The trip version the client is looking at and the cells to return.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchasesRequest'
+      security:
+        - cookieAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '200':
+          description: The updated trip.
+          headers:
+            Cache-Control:
+              description: Responses are not stored by caches.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingTrip'
+              examples:
+                open:
+                  summary: All cells to buy
+                  externalValue: examples/shopping-trip.json
+        '400':
+          $ref: '#/components/responses/TripInvalidRequest'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/TripOrPlanNotFound'
+        '409':
+          $ref: '#/components/responses/TripConflict'
   /api/v1/shopping-trips/{trip_id}/done:
     post:
       tags: [Shopping trips]
       operationId: markShoppingTripDone
-      summary: Mark a trip done
+      summary: Mark every to-buy cell bought
       description: |-
-        Records, for every week, the plan's current revision and snapshot_id; items are frozen to those revisions from now on. 409 trip_not_done when the trip is already done. A plan edited afterwards only shows changed_since_shopping on its week. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Shortcut for marking every to-buy cell bought (see markShoppingTripPurchases): each freezes its plan's current revision and snapshot_id. 409 invalid_transition when no cell is to buy. A plan edited afterwards only shows changed_since_shopping on the cell. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1392,9 +1482,9 @@ paths:
     post:
       tags: [Shopping trips]
       operationId: reopenShoppingTrip
-      summary: Reopen a done trip
+      summary: Return every bought cell to to-buy
       description: |-
-        Returns a done trip to open; items follow the weeks' current revisions again. 409 trip_not_done when the trip is already open. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Shortcut for returning every bought cell to to-buy (see unmarkShoppingTripPurchases); totals follow the current revisions again. 409 invalid_transition when no cell is bought. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1439,7 +1529,7 @@ paths:
       operationId: getCoverage
       summary: Read week coverage for a date range
       description: |-
-        For every plan whose Monday-through-Sunday week overlaps the inclusive range (same range rules as listPlans), reports coverage per shelf-life group (long_lasting and fresh) derived from shopping trips: not_covered (no trip), on_list (open trip) or covered (done trip), with the trip_id and changed_since_shopping (true when the plan's current revision is newer than the revision the done trip covered). Coverage is never stored on the plan, so plan summaries are unchanged. When the API is not SQLite-backed every group of every plan is not_covered.
+        For every plan whose Monday-through-Sunday week overlaps the inclusive range (same range rules as listPlans), reports coverage per shelf-life group (long_lasting and fresh) derived from shopping trips: not_covered (on no trip), to_buy (a to-buy cell) or bought (a bought cell), with the trip_id and changed_since_shopping (true for a bought cell when the plan's current revision is newer than the revision it was bought at). Coverage is never stored on the plan, so plan summaries are unchanged. When the API is not SQLite-backed every group of every plan is not_covered.
       parameters:
         - $ref: '#/components/parameters/CoverageFrom'
         - $ref: '#/components/parameters/CoverageTo'
@@ -2038,7 +2128,7 @@ components:
               summary: Plan is not on this trip
               externalValue: examples/error-week-not-on-trip.json
     TripConflict:
-      description: stale_version (expected_version is behind), week_already_on_trip, trip_done (needs an open trip), trip_not_done (needs a done trip), or last_week. Nothing was changed.
+      description: stale_version (expected_version is behind), week_already_on_trip, invalid_transition (a cell is already in the requested state, or no cell can move), or last_week. Nothing was changed.
       headers:
         Cache-Control:
           description: Responses are not stored by caches.
@@ -2056,12 +2146,9 @@ components:
             weekAlreadyOnTrip:
               summary: Plan is already on a trip
               externalValue: examples/error-week-already-on-trip.json
-            tripDone:
-              summary: Trip is done; reopen it first
-              externalValue: examples/error-trip-done.json
-            tripNotDone:
-              summary: Trip is not done
-              externalValue: examples/error-trip-not-done.json
+            invalidTransition:
+              summary: A cell is already in the requested state
+              externalValue: examples/error-invalid-transition.json
             lastWeek:
               summary: Cannot remove the only week
               externalValue: examples/error-last-week.json
@@ -2918,13 +3005,21 @@ components:
         groups:
           type: array
           minItems: 1
-          uniqueItems: true
-          description: The groups of the swapped week this list covers, ordered long_lasting, fresh.
+          maxItems: 2
+          description: The week's cells on this list, ordered long_lasting, fresh, each with its state.
           items:
-            $ref: '#/components/schemas/ShelfLife'
+            type: object
+            additionalProperties: false
+            required: [group, state]
+            properties:
+              group:
+                $ref: '#/components/schemas/ShelfLife'
+              state:
+                type: string
+                enum: [to_buy, bought]
         extra_needed:
           type: array
-          description: Always empty for an open list (it follows the new revision). For a done list, what the swapped week needs beyond what the list covered, for the ingredients of its groups only.
+          description: Empty while every cell is to buy (they follow the new revision). For bought cells, what the swapped week needs beyond the cell's frozen revision, for the ingredients of that cell's group only.
           items:
             $ref: '#/components/schemas/ExtraNeededRow'
     SwapPreview:
@@ -3028,8 +3123,8 @@ components:
             $ref: '#/components/schemas/RevisionSummary'
     CoverageState:
       type: string
-      enum: [not_covered, on_list, covered]
-      description: not_covered (no trip), on_list (open trip), covered (done trip).
+      enum: [not_covered, to_buy, bought]
+      description: not_covered (the week's group is on no trip), to_buy (a to-buy cell) or bought (a bought cell).
     ShelfLife:
       type: string
       enum: [long_lasting, fresh]
@@ -3048,10 +3143,35 @@ components:
             - type: 'null'
         changed_since_shopping:
           type: boolean
+    TripCell:
+      type: object
+      additionalProperties: false
+      required: [group, state, bought_at, revision, snapshot_id, changed_since_shopping]
+      description: One (week, group) on the trip. A bought cell freezes the revision and snapshot it was bought at; a to-buy cell follows the plan's current revision and has null bought_at, revision and snapshot_id.
+      properties:
+        group:
+          $ref: '#/components/schemas/ShelfLife'
+        state:
+          type: string
+          enum: [to_buy, bought]
+        bought_at:
+          type: [string, 'null']
+          format: date-time
+        revision:
+          type: [integer, 'null']
+          minimum: 1
+          description: The plan revision frozen when the cell was bought; null while to buy.
+        snapshot_id:
+          type: [string, 'null']
+          minLength: 1
+          description: snapshot_id of that revision; null while to buy.
+        changed_since_shopping:
+          type: boolean
+          description: True for a bought cell when the plan's current_revision is newer than revision.
     ShoppingTripWeek:
       type: object
       additionalProperties: false
-      required: [plan_id, week_start, week_end, revision, snapshot_id, current_revision, coverage, changed_since_shopping, groups]
+      required: [plan_id, week_start, week_end, current_revision, groups, cells]
       properties:
         plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
         week_start:
@@ -3060,25 +3180,10 @@ components:
         week_end:
           type: string
           format: date
-        revision:
-          type: integer
-          minimum: 1
-          description: The plan revision this trip's items use for the week; the current revision on an open trip, the covered revision on a done trip.
-        snapshot_id:
-          type: string
-          minLength: 1
-          description: snapshot_id of that revision.
         current_revision:
           type: integer
           minimum: 1
           description: The plan's current revision when the trip was read.
-        coverage:
-          type: string
-          enum: [on_list, covered]
-          description: on_list for an open trip, covered for a done trip.
-        changed_since_shopping:
-          type: boolean
-          description: True on a done trip when current_revision is newer than revision.
         groups:
           type: array
           minItems: 1
@@ -3087,10 +3192,17 @@ components:
           description: The shelf-life groups of this week on the trip, ordered long_lasting, fresh. A week appears once with all its groups on the trip.
           items:
             $ref: '#/components/schemas/ShelfLife'
+        cells:
+          type: array
+          minItems: 1
+          maxItems: 2
+          description: One cell per entry of groups, in the same order.
+          items:
+            $ref: '#/components/schemas/TripCell'
     ShoppingTripItem:
       type: object
       additionalProperties: false
-      required: [ingredient_id, display, quantity, unit, section, shelf_life, plan_ids]
+      required: [ingredient_id, display, quantity, unit, section, shelf_life, plan_ids, quantity_by_plan]
       properties:
         ingredient_id:
           type: string
@@ -3112,10 +3224,17 @@ components:
           type: array
           description: Plans whose grocery rows contribute to this item, in week order.
           items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        quantity_by_plan:
+          type: object
+          description: Each contributing plan's quantity (rounded to 2 decimals); quantity is exactly their sum. Lets a client total any subset of cells offline.
+          propertyNames: {minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+          additionalProperties:
+            type: number
+            minimum: 0
     ShoppingTrip:
       type: object
       additionalProperties: false
-      required: [trip_id, name, status, version, created_at, updated_at, completed_at, weeks, items]
+      required: [trip_id, name, status, version, created_at, updated_at, completed_at, weeks, items, bought_items]
       description: A shopping trip (called a shopping list in the UI) with its weeks and derived items. Reused by the static publication.
       properties:
         trip_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
@@ -3126,6 +3245,7 @@ components:
         status:
           type: string
           enum: [open, done]
+          description: Derived - done when every cell is bought, else open.
         version:
           type: integer
           minimum: 1
@@ -3139,7 +3259,7 @@ components:
         completed_at:
           type: [string, 'null']
           format: date-time
-          description: When the trip was marked done; null while open.
+          description: The latest bought_at while the trip is done (every cell bought); null while open.
         weeks:
           type: array
           minItems: 1
@@ -3148,7 +3268,12 @@ components:
             $ref: '#/components/schemas/ShoppingTripWeek'
         items:
           type: array
-          description: Derived sum of the weeks' saved grocery rows per ingredient and unit, only for each week's covered groups, grouped by section. Each item carries its shelf_life.
+          description: The to-buy totals - the sum of the saved grocery rows (at the plans' current revisions) of the to-buy cells, per ingredient and unit, grouped by section. Each item carries its shelf_life, plan_ids and quantity_by_plan. Bought cells never count here.
+          items:
+            $ref: '#/components/schemas/ShoppingTripItem'
+        bought_items:
+          type: array
+          description: The same totals for the bought cells, at their frozen revisions (shown as "Already bought").
           items:
             $ref: '#/components/schemas/ShoppingTripItem'
     ShoppingTripList:
@@ -3201,6 +3326,28 @@ components:
           type: integer
           minimum: 1
           maximum: 2147483647
+    PurchasesRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, cells]
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        cells:
+          type: array
+          minItems: 1
+          maxItems: 120
+          description: The (week, group) cells to move; each at most once.
+          items:
+            type: object
+            additionalProperties: false
+            required: [plan_id, group]
+            properties:
+              plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+              group:
+                $ref: '#/components/schemas/ShelfLife'
     ExpectedVersionRequest:
       type: object
       additionalProperties: false
@@ -3253,7 +3400,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_week, unauthenticated, invalid_credentials, too_many_attempts, cross_origin_rejected, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, trip_done, trip_not_done, week_not_on_trip, last_week, invalid_months, publish_in_progress, publishing_disabled, publish_failed, not_found]
+              enum: [invalid_request, invalid_week, unauthenticated, invalid_credentials, too_many_attempts, cross_origin_rejected, read_only, plan_not_found, snapshot_changed, source_unavailable, source_invalid, stale_revision, proposal_not_found, proposal_expired, input_basis_changed, retry_id_reused, nothing_to_undo, linked_pair_split, week_not_editable, duplicate_week, generation_failed, rule_violation, generation_busy, slot_not_found, variant_not_found, slot_not_editable, trip_not_found, stale_version, week_already_on_trip, invalid_transition, week_not_on_trip, last_week, invalid_months, publish_in_progress, publishing_disabled, publish_failed, not_found]
             message:
               type: string
             details:

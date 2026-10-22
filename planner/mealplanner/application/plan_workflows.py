@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ..domain.month import MonthFillResult, WeekFillOutcome, parse_month, week_seed, weeks_of_month
 from ..domain.planner_inputs import PlannerInputs
 from ..domain.snapshot import JsonObject, PlanSnapshot, normalize_snapshot
-from ..domain.shopping_trip import DONE
+from ..domain.shopping_trip import BOUGHT
 from ..domain.swap import (
     SCOPES,
     SlotNotEditable,
@@ -426,8 +426,8 @@ class PlanWorkflowService:
     def _trip_impact(
         self, plan_id: str, swapped: PlanSnapshot, inputs: PlannerInputs
     ) -> tuple[JsonObject, ...]:
-        """Every shopping list holding the week, with the groups it covers; a done list also
-        lists what is newly needed, limited to the ingredients of its groups."""
+        """Every shopping list holding the week, with each cell's state; bought cells also
+        list what is newly needed beyond their frozen revision, limited to their group."""
         if self._trips is None:
             return ()
         labels = inputs.shelf_lives()
@@ -437,21 +437,22 @@ class PlanWorkflowService:
             if week is None:
                 continue
             extra: list[JsonObject] = []
-            if trip.status == DONE and week.covered_revision is not None:
-                covered = self._repo.get_revision(plan_id, week.covered_revision)
+            for cell in week.cells:
+                if cell.state != BOUGHT or cell.revision is None:
+                    continue  # to-buy cells follow the new revision
+                covered = self._repo.get_revision(plan_id, cell.revision)
                 if covered is not None:
-                    extra = extra_needed(
+                    extra += extra_needed(
                         covered.snapshot.shopping_list,
                         swapped.shopping_list,
-                        lambda ingredient_id, groups=week.groups: labels.get(ingredient_id) in groups
-                        or ingredient_id not in labels,
+                        lambda ingredient_id, group=cell.group: labels.get(ingredient_id) == group,
                     )
             impact.append(
                 {
                     "trip_id": trip.trip_id,
                     "name": trip.display_name,
                     "status": trip.status,
-                    "groups": list(week.groups),
+                    "groups": [{"group": c.group, "state": c.state} for c in week.cells],
                     "extra_needed": extra,
                 }
             )

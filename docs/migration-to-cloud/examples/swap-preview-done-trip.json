@@ -35,14 +35,14 @@
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 80.0,
             "role": "veg",
             "unit": "g"
           },
           {
-            "display": "Br\u00f3coli",
+            "display": "Brócoli",
             "ingredient_id": "broccoli",
             "quantity": 100.0,
             "role": "veg",
@@ -84,14 +84,14 @@
             "unit": "ml"
           },
           {
-            "display": "Ajonjol\u00ed",
+            "display": "Ajonjolí",
             "ingredient_id": "sesame_seeds",
             "quantity": 5.0,
             "role": "garnish",
             "unit": "g"
           },
           {
-            "display": "Aceite de ajonjol\u00ed",
+            "display": "Aceite de ajonjolí",
             "ingredient_id": "sesame_oil",
             "quantity": 5.0,
             "role": "fat",
@@ -113,7 +113,7 @@
           "value": 260.0
         },
         "recipe_id": "pollo_asiatico",
-        "recipe_name": "Pollo asi\u00e1tico",
+        "recipe_name": "Pollo asiático",
         "variant_id": "pollo_asiatico__carb_rice"
       },
       "assignment_id": "slot_2026-10-22_lunch",
@@ -136,7 +136,7 @@
             "unit": "g"
           },
           {
-            "display": "Br\u00f3coli",
+            "display": "Brócoli",
             "ingredient_id": "broccoli",
             "quantity": 200.0,
             "role": "veg",
@@ -150,14 +150,14 @@
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 60.0,
             "role": "veg",
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 60.0,
             "role": "veg",
@@ -192,7 +192,7 @@
             "unit": "g"
           },
           {
-            "display": "Ajonjol\u00ed",
+            "display": "Ajonjolí",
             "ingredient_id": "sesame_seeds",
             "quantity": 5.0,
             "role": "fat",
@@ -206,7 +206,7 @@
             "unit": "ml"
           },
           {
-            "display": "Pl\u00e1tano verde",
+            "display": "Plátano verde",
             "ingredient_id": "platano_verde",
             "quantity": 100.0,
             "role": "carb",
@@ -221,7 +221,7 @@
           "value": 280.0
         },
         "recipe_id": "brocoli_con_carne",
-        "recipe_name": "Br\u00f3coli con carne de res",
+        "recipe_name": "Brócoli con carne de res",
         "variant_id": "brocoli_con_carne__carb_platano_verde"
       },
       "date": "2026-10-22",
@@ -262,14 +262,14 @@
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 80.0,
             "role": "veg",
             "unit": "g"
           },
           {
-            "display": "Br\u00f3coli",
+            "display": "Brócoli",
             "ingredient_id": "broccoli",
             "quantity": 100.0,
             "role": "veg",
@@ -311,14 +311,14 @@
             "unit": "ml"
           },
           {
-            "display": "Ajonjol\u00ed",
+            "display": "Ajonjolí",
             "ingredient_id": "sesame_seeds",
             "quantity": 5.0,
             "role": "garnish",
             "unit": "g"
           },
           {
-            "display": "Aceite de ajonjol\u00ed",
+            "display": "Aceite de ajonjolí",
             "ingredient_id": "sesame_oil",
             "quantity": 5.0,
             "role": "fat",
@@ -340,7 +340,7 @@
           "value": 100.0
         },
         "recipe_id": "pollo_asiatico",
-        "recipe_name": "Pollo asi\u00e1tico",
+        "recipe_name": "Pollo asiático",
         "variant_id": "pollo_asiatico__carb_rice"
       },
       "assignment_id": "slot_2026-10-22_dinner",
@@ -360,7 +360,7 @@
             "unit": "g"
           },
           {
-            "display": "Br\u00f3coli",
+            "display": "Brócoli",
             "ingredient_id": "broccoli",
             "quantity": 200.0,
             "role": "veg",
@@ -374,14 +374,14 @@
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 60.0,
             "role": "veg",
             "unit": "g"
           },
           {
-            "display": "Piment\u00f3n",
+            "display": "Pimentón",
             "ingredient_id": "bell_pepper",
             "quantity": 60.0,
             "role": "veg",
@@ -416,7 +416,7 @@
             "unit": "g"
           },
           {
-            "display": "Ajonjol\u00ed",
+            "display": "Ajonjolí",
             "ingredient_id": "sesame_seeds",
             "quantity": 5.0,
             "role": "fat",
@@ -438,7 +438,7 @@
           "value": 100.0
         },
         "recipe_id": "brocoli_con_carne",
-        "recipe_name": "Br\u00f3coli con carne de res",
+        "recipe_name": "Brócoli con carne de res",
         "variant_id": "brocoli_con_carne__carb_none"
       },
       "date": "2026-10-22",
@@ -460,7 +460,7 @@
       "after": 0,
       "before": 100.0,
       "difference": -100.0,
-      "display": "Pl\u00e1tano verde",
+      "display": "Plátano verde",
       "ingredient_id": "platano_verde",
       "section": "carb",
       "unit": "g"
@@ -496,7 +496,7 @@
       "after": 200.0,
       "before": 400.0,
       "difference": -200.0,
-      "display": "Br\u00f3coli",
+      "display": "Brócoli",
       "ingredient_id": "broccoli",
       "section": "vegetable",
       "unit": "g"
@@ -505,7 +505,7 @@
       "after": 220.0,
       "before": 300.0,
       "difference": -80.0,
-      "display": "Piment\u00f3n",
+      "display": "Pimentón",
       "ingredient_id": "bell_pepper",
       "section": "vegetable",
       "unit": "g"
@@ -580,8 +580,14 @@
         }
       ],
       "groups": [
-        "long_lasting",
-        "fresh"
+        {
+          "group": "long_lasting",
+          "state": "bought"
+        },
+        {
+          "group": "fresh",
+          "state": "bought"
+        }
       ],
       "name": "Oct 19 - Oct 25",
       "status": "done",

@@ -3,8 +3,9 @@
 const MESSAGES = {
   stale_version: 'This shopping list changed since you opened it (another tab or device?). It was reloaded, so check it and try again.',
   week_already_on_trip: 'That week (or that part of it, long-lasting or fresh) is already on another shopping list. Remove it from that list first.',
-  trip_done: 'This shopping list is done. Reopen it to change its weeks.',
-  trip_not_done: 'This shopping list is not done. It was reloaded.',
+  invalid_transition: 'Those weeks were already in that state (another tab or device?). The list was reloaded.',
+  trip_done: 'This shopping list changed. It was reloaded.',
+  trip_not_done: 'This shopping list changed. It was reloaded.',
   last_week: 'A list needs at least one week. Delete the list instead.',
   week_not_on_trip: 'That week is no longer on this list. It was reloaded.',
   trip_not_found: 'This shopping list no longer exists.',
@@ -12,7 +13,7 @@ const MESSAGES = {
   forbidden: 'Shopping lists can only be changed from the home network.',
   read_only: 'Shopping lists need the database-backed home server.',
 };
-const REFETCH = new Set(['stale_version', 'trip_done', 'trip_not_done', 'last_week', 'week_not_on_trip']);
+const REFETCH = new Set(['stale_version', 'invalid_transition', 'trip_done', 'trip_not_done', 'last_week', 'week_not_on_trip']);
 
 export function tripProblemMessage(error) { return MESSAGES[error?.code] || error?.message || 'The shopping list could not be changed.'; }
 

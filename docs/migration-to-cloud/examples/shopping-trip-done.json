@@ -5,24 +5,39 @@
   "version": 3,
   "created_at": "2026-10-21T10:00:00-05:00",
   "updated_at": "2026-10-21T10:05:00-05:00",
-  "completed_at": "2026-10-21T10:05:00-05:00",
+  "completed_at": "2026-10-21T10:30:00-05:00",
   "weeks": [
     {
       "plan_id": "plan_2026_10_19",
       "week_start": "2026-10-19",
       "week_end": "2026-10-25",
-      "revision": 1,
-      "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
       "current_revision": 2,
-      "coverage": "covered",
-      "changed_since_shopping": true,
       "groups": [
         "long_lasting",
         "fresh"
+      ],
+      "cells": [
+        {
+          "group": "long_lasting",
+          "state": "bought",
+          "bought_at": "2026-10-21T10:30:00-05:00",
+          "revision": 1,
+          "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
+          "changed_since_shopping": true
+        },
+        {
+          "group": "fresh",
+          "state": "bought",
+          "bought_at": "2026-10-21T10:30:00-05:00",
+          "revision": 1,
+          "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
+          "changed_since_shopping": true
+        }
       ]
     }
   ],
-  "items": [
+  "items": [],
+  "bought_items": [
     {
       "ingredient_id": "chicken",
       "display": "Pollo",
@@ -32,7 +47,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 720.0
+      }
     },
     {
       "ingredient_id": "sausage",
@@ -43,7 +61,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 330.0
+      }
     },
     {
       "ingredient_id": "fish_salmon",
@@ -54,7 +75,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 100.0
+      }
     },
     {
       "ingredient_id": "fish_tuna_fillet",
@@ -65,7 +89,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 280.0
+      }
     },
     {
       "ingredient_id": "beef",
@@ -76,7 +103,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 380.0
+      }
     },
     {
       "ingredient_id": "fish_tuna_canned",
@@ -87,7 +117,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 100.0
+      }
     },
     {
       "ingredient_id": "cherry_tomato",
@@ -98,7 +131,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 200.0
+      }
     },
     {
       "ingredient_id": "spinach",
@@ -109,7 +145,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 160.0
+      }
     },
     {
       "ingredient_id": "carrot",
@@ -120,7 +159,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 320.0
+      }
     },
     {
       "ingredient_id": "tomato",
@@ -131,7 +173,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 370.0
+      }
     },
     {
       "ingredient_id": "asparagus",
@@ -142,7 +187,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 370.0
+      }
     },
     {
       "ingredient_id": "ginger",
@@ -153,7 +201,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 30.0
+      }
     },
     {
       "ingredient_id": "green_beans",
@@ -164,7 +215,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 170.0
+      }
     },
     {
       "ingredient_id": "broccoli",
@@ -175,7 +229,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 400.0
+      }
     },
     {
       "ingredient_id": "bell_pepper",
@@ -186,7 +243,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 300.0
+      }
     },
     {
       "ingredient_id": "peas",
@@ -197,7 +257,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 50.0
+      }
     },
     {
       "ingredient_id": "olives",
@@ -208,7 +271,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 60.0
+      }
     },
     {
       "ingredient_id": "tomato_sauce",
@@ -219,7 +285,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 50.0
+      }
     },
     {
       "ingredient_id": "achiote",
@@ -230,7 +299,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 5.0
+      }
     },
     {
       "ingredient_id": "greek_yogurt",
@@ -241,7 +313,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 100.0
+      }
     },
     {
       "ingredient_id": "yuca",
@@ -252,7 +327,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 70.0
+      }
     },
     {
       "ingredient_id": "lentils",
@@ -263,7 +341,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 55.0
+      }
     },
     {
       "ingredient_id": "rice",
@@ -274,7 +355,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 80.0
+      }
     },
     {
       "ingredient_id": "platano_verde",
@@ -285,7 +369,10 @@
       "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 100.0
+      }
     },
     {
       "ingredient_id": "sesame_seeds",
@@ -296,7 +383,10 @@
       "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
-      ]
+      ],
+      "quantity_by_plan": {
+        "plan_2026_10_19": 15.0
+      }
     }
   ]
 }

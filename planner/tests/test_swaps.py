@@ -325,11 +325,13 @@ def test_preview_trip_impact_open_done_and_none(env: SwapEnv) -> None:
     (impact,) = env.svc.preview_swap(*args).trips
     assert impact == {
         "trip_id": trip["trip_id"], "name": "Weekly", "status": "open",
-        "groups": ["long_lasting", "fresh"], "extra_needed": [],
+        "groups": [{"group": "long_lasting", "state": "to_buy"}, {"group": "fresh", "state": "to_buy"}],
+        "extra_needed": [],
     }
     env.trips.mark_done(trip["trip_id"], trip["version"])
     (done,) = env.svc.preview_swap(*args).trips
     assert done["status"] == "done" and done["trip_id"] == trip["trip_id"]
+    assert done["groups"] == [{"group": "long_lasting", "state": "bought"}, {"group": "fresh", "state": "bought"}]
     base = totals(env.current().snapshot.shopping_list)
     env.swap(slot, variant, "pair")
     new = totals(env.current().snapshot.shopping_list)
@@ -345,8 +347,20 @@ def test_done_trip_keeps_items_and_flags_the_week_after_a_swap(env: SwapEnv) -> 
     slot = env.unlinked()
     env.swap(slot, env.variant_for(slot, protein_differs=True), "single")
     after = env.trips.get(trip["trip_id"])
-    assert after["items"] == done["items"]
-    assert after["weeks"][0]["changed_since_shopping"] is True
+    assert after["items"] == [] and after["bought_items"] == done["bought_items"]
+    assert [c["changed_since_shopping"] for c in after["weeks"][0]["cells"]] == [True, True]
+
+
+def test_preview_with_one_group_bought_limits_extra_needed_to_it(env: SwapEnv) -> None:
+    slot = env.linked_lunch()
+    variant = env.variant_for(slot, protein_differs=True)
+    trip = env.trips.create([env.plan_id])
+    env.trips.mark_purchases(trip["trip_id"], [(env.plan_id, "long_lasting")], trip["version"])
+    (impact,) = env.svc.preview_swap(env.plan_id, slot["assignment_id"], variant, "pair", 1).trips
+    assert impact["status"] == "open"
+    assert impact["groups"] == [{"group": "long_lasting", "state": "bought"}, {"group": "fresh", "state": "to_buy"}]
+    labels = INPUTS.shelf_lives()
+    assert {labels[r["ingredient_id"]] for r in impact["extra_needed"]} <= {"long_lasting"}
 
 
 def test_open_trip_follows_the_swap(env: SwapEnv) -> None:
@@ -354,7 +368,7 @@ def test_open_trip_follows_the_swap(env: SwapEnv) -> None:
     slot = env.unlinked()
     env.swap(slot, env.variant_for(slot, protein_differs=True), "single")
     after = env.trips.get(trip["trip_id"])
-    assert after["weeks"][0]["revision"] == 2
+    assert after["weeks"][0]["current_revision"] == 2
     assert {(i["ingredient_id"], i["unit"]): i["quantity"] for i in after["items"]} == totals(
         env.current().snapshot.shopping_list
     )

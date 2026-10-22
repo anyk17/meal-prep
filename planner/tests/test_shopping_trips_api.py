@@ -106,12 +106,12 @@ def test_full_lifecycle_and_coverage(client) -> None:
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-11-15"), 200, "CoverageList")["items"]
     for group in ("long_lasting", "fresh"):
         assert [(i["plan_id"], i["groups"][group]["coverage"], i["groups"][group]["trip_id"]) for i in cov] == [
-            (P1, "covered", trip["trip_id"]), (P2, "not_covered", None), (P3, "not_covered", None)
+            (P1, "bought", trip["trip_id"]), (P2, "not_covered", None), (P3, "not_covered", None)
         ]
     trip = ok(client.post(f"{url}/reopen", json={"expected_version": 4}), 200, "ShoppingTrip")
     assert trip["status"] == "open" and trip["version"] == 5
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"]
-    assert [(i["plan_id"], i["groups"]["fresh"]["coverage"]) for i in cov] == [(P1, "on_list")]
+    assert [(i["plan_id"], i["groups"]["fresh"]["coverage"]) for i in cov] == [(P1, "to_buy")]
     assert client.delete(f"{url}?expected_version=5").status_code == 204
     fail(client.get(url), 404, "trip_not_found")
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"]
@@ -136,13 +136,11 @@ def test_error_codes(client) -> None:
         {"field": "expected_version", "message": "9"}, {"field": "actual_version", "message": "1"}
     ]
     fail(client.delete(f"{url}?expected_version=9"), 409, "stale_version")
-    fail(client.post(f"{url}/reopen", json={"expected_version": 1}), 409, "trip_not_done")
+    fail(client.post(f"{url}/reopen", json={"expected_version": 1}), 409, "invalid_transition")
     fail(client.delete(f"{url}/weeks/{P1}?expected_version=1"), 409, "last_week")
     fail(client.delete(f"{url}/weeks/{P2}?expected_version=1"), 404, "week_not_on_trip")
     ok(client.post(f"{url}/done", json={"expected_version": 1}), 200, "ShoppingTrip")
-    fail(client.post(f"{url}/done", json={"expected_version": 2}), 409, "trip_not_done")
-    fail(client.post(f"{url}/weeks", json={"plan_id": P2, "expected_version": 2}), 409, "trip_done")
-    fail(client.delete(f"{url}/weeks/{P1}?expected_version=2"), 409, "trip_done")
+    fail(client.post(f"{url}/done", json={"expected_version": 2}), 409, "invalid_transition")
     other = make_trip(client, [P2])
     fail(client.post(f"{BASE}/{other['trip_id']}/weeks", json={"plan_id": P1, "expected_version": 1}),
          409, "week_already_on_trip")
@@ -181,10 +179,12 @@ def test_done_freezes_items_when_plan_changes(client) -> None:
                    json={"expected_revision": 1}, headers={"Idempotency-Key": "k1"}), 200, "MutationResult")
     after = ok(client.get(url), 200, "ShoppingTrip")
     assert after["items"] == done["items"] and after["version"] == done["version"]
-    assert after["weeks"][0]["changed_since_shopping"] is True and after["weeks"][0]["current_revision"] == 2
+    assert after["items"] == [] and after["bought_items"] == done["bought_items"]
+    assert [c["changed_since_shopping"] for c in after["weeks"][0]["cells"]] == [True, True]
+    assert after["weeks"][0]["current_revision"] == 2
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"][0]
     assert {g: (v["coverage"], v["changed_since_shopping"]) for g, v in cov["groups"].items()} == {
-        "long_lasting": ("covered", True), "fresh": ("covered", True)
+        "long_lasting": ("bought", True), "fresh": ("bought", True)
     }
 
 
@@ -198,6 +198,8 @@ def test_mutations_need_login(db_path, client) -> None:
         anonymous.delete(f"{url}/weeks/{P1}?expected_version=1"),
         anonymous.post(f"{url}/done", json={"expected_version": 1}),
         anonymous.post(f"{url}/reopen", json={"expected_version": 1}),
+        anonymous.post(f"{url}/purchases", json={"expected_version": 1, "cells": [{"plan_id": P1, "group": "fresh"}]}),
+        anonymous.post(f"{url}/purchases/undo", json={"expected_version": 1, "cells": [{"plan_id": P1, "group": "fresh"}]}),
         anonymous.delete(f"{url}?expected_version=1"),
     ):
         fail(response, 401, "unauthenticated")
@@ -210,6 +212,7 @@ def test_json_mode_is_read_only() -> None:
     fail(client.get(f"{BASE}/trip_x"), 404, "trip_not_found")
     fail(client.post(BASE, json={"plan_ids": ["plan_2026_10_19"]}), 403, "read_only")
     fail(client.post(f"{BASE}/trip_x/done", json={"expected_version": 1}), 403, "read_only")
+    fail(client.post(f"{BASE}/trip_x/purchases", json={"expected_version": 1, "cells": []}), 403, "read_only")
     fail(client.delete(f"{BASE}/trip_x?expected_version=1"), 403, "read_only")
     cov = ok(client.get("/api/v1/coverage?from=2026-10-19&to=2026-10-19"), 200, "CoverageList")
     assert [
@@ -230,7 +233,7 @@ def test_create_with_groups_items_and_coverage(client) -> None:
     assert [w["groups"] for w in trip["weeks"]] == [["long_lasting"]]
     assert trip["items"] and {i["shelf_life"] for i in trip["items"]} == {"long_lasting"}
     groups = coverage_of(client, P1, "2026-10-26")
-    assert groups["long_lasting"] == {"coverage": "on_list", "trip_id": trip["trip_id"], "changed_since_shopping": False}
+    assert groups["long_lasting"] == {"coverage": "to_buy", "trip_id": trip["trip_id"], "changed_since_shopping": False}
     assert groups["fresh"] == {"coverage": "not_covered", "trip_id": None, "changed_since_shopping": False}
     # default is both groups on a new week
     both = make_trip(client, [P2])
@@ -247,7 +250,7 @@ def test_long_lasting_covers_week_two_while_fresh_does_not(client) -> None:
         (P1, ["long_lasting", "fresh"]), (P2, ["long_lasting"])
     ]
     week2 = coverage_of(client, P2, "2026-11-02")
-    assert week2["long_lasting"]["coverage"] == "on_list" and week2["fresh"]["coverage"] == "not_covered"
+    assert week2["long_lasting"]["coverage"] == "to_buy" and week2["fresh"]["coverage"] == "not_covered"
     # the second list covers fresh for week two; the first week still belongs to the first list
     second = make_trip(client, [P2], groups=["fresh"])
     week2 = coverage_of(client, P2, "2026-11-02")
@@ -286,3 +289,87 @@ def test_delete_week_with_group_query(client) -> None:
     trip = ok(client.delete(f"{url}/weeks/{P2}?expected_version=3&group=fresh"), 200, "ShoppingTrip")
     fail(client.delete(f"{url}/weeks/{P2}?expected_version=4&group=long_lasting"), 409, "last_week")
     assert trip["weeks"][0]["groups"] == ["long_lasting"]
+
+
+# ---------------------------------------------------------------- purchases (phase 5c)
+
+
+def cells(*pairs: tuple[str, str]) -> list[dict]:
+    return [{"plan_id": plan_id, "group": group} for plan_id, group in pairs]
+
+
+def test_mark_and_undo_purchases(client) -> None:
+    trip = make_trip(client)
+    url = f"{BASE}/{trip['trip_id']}"
+    marked = ok(
+        client.post(f"{url}/purchases", json={"expected_version": 1, "cells": cells((P1, "long_lasting"), (P2, "long_lasting"))}),
+        200, "ShoppingTrip",
+    )
+    assert marked["version"] == 2 and marked["status"] == "open" and marked["completed_at"] is None
+    assert [[(c["group"], c["state"]) for c in w["cells"]] for w in marked["weeks"]] == [
+        [("long_lasting", "bought"), ("fresh", "to_buy")]
+    ] * 2
+    assert {i["shelf_life"] for i in marked["items"]} == {"fresh"}
+    assert {i["shelf_life"] for i in marked["bought_items"]} == {"long_lasting"}
+    for item in marked["items"] + marked["bought_items"]:
+        assert round(sum(item["quantity_by_plan"].values()), 2) == item["quantity"]
+    groups = coverage_of(client, P1, "2026-10-26")
+    assert (groups["long_lasting"]["coverage"], groups["fresh"]["coverage"]) == ("bought", "to_buy")
+    # a plan edit flags only the bought cell and leaves bought_items frozen
+    proposal = ok(client.post(f"/api/v1/plans/{P1}/proposals", json={"expected_revision": 1, "seed": 2}), 201, "Proposal")
+    ok(client.post(f"/api/v1/plans/{P1}/proposals/{proposal['proposal_id']}/accept",
+                   json={"expected_revision": 1}, headers={"Idempotency-Key": "k5c"}), 200, "MutationResult")
+    after = ok(client.get(url), 200, "ShoppingTrip")
+    assert after["bought_items"] == marked["bought_items"]
+    assert [c["changed_since_shopping"] for c in after["weeks"][0]["cells"]] == [True, False]
+    assert [c["changed_since_shopping"] for c in after["weeks"][1]["cells"]] == [False, False]
+    assert coverage_of(client, P1, "2026-10-26")["long_lasting"]["changed_since_shopping"] is True
+    undone = ok(
+        client.post(f"{url}/purchases/undo", json={"expected_version": 2, "cells": cells((P1, "long_lasting"))}),
+        200, "ShoppingTrip",
+    )
+    assert undone["version"] == 3
+    assert [(c["state"], c["revision"], c["bought_at"]) for c in undone["weeks"][0]["cells"]] == [("to_buy", None, None)] * 2
+
+
+def test_purchases_make_the_list_done_and_adding_a_week_reopens_it(client) -> None:
+    trip = make_trip(client, [P1])
+    url = f"{BASE}/{trip['trip_id']}"
+    both = cells((P1, "long_lasting"), (P1, "fresh"))
+    done = ok(client.post(f"{url}/purchases", json={"expected_version": 1, "cells": both}), 200, "ShoppingTrip")
+    assert done["status"] == "done" and done["completed_at"] and done["items"] == []
+    added = ok(client.post(f"{url}/weeks", json={"plan_id": P2, "expected_version": 2}), 200, "ShoppingTrip")
+    assert added["status"] == "open" and added["completed_at"] is None and added["items"]
+    removed = ok(client.delete(f"{url}/weeks/{P2}?expected_version=3"), 200, "ShoppingTrip")
+    assert removed["status"] == "done"  # weeks can be edited in any state
+    reopened = ok(client.post(f"{url}/reopen", json={"expected_version": 4}), 200, "ShoppingTrip")
+    assert reopened["status"] == "open" and reopened["bought_items"] == []
+
+
+def test_purchase_errors(client) -> None:
+    trip = make_trip(client, [P1], groups=["long_lasting"])
+    url = f"{BASE}/{trip['trip_id']}"
+    body = lambda *pairs, v=1: {"expected_version": v, "cells": cells(*pairs)}  # noqa: E731
+    fail(client.post(f"{url}/purchases", json=body((P1, "fresh"))), 404, "week_not_on_trip")  # group not on the trip
+    fail(client.post(f"{url}/purchases", json=body((P2, "long_lasting"))), 404, "week_not_on_trip")
+    fail(client.post(f"{url}/purchases/undo", json=body((P2, "fresh"))), 404, "week_not_on_trip")
+    fail(client.post(f"{BASE}/trip_missing/purchases", json=body((P1, "long_lasting"))), 404, "trip_not_found")
+    fail(client.post(f"{url}/purchases/undo", json=body((P1, "long_lasting"))), 409, "invalid_transition")  # not bought
+    err = fail(client.post(f"{url}/purchases", json=body((P1, "long_lasting"), v=9)), 409, "stale_version")
+    assert {"field": "actual_version", "message": "1"} in err["details"]
+    ok(client.post(f"{url}/purchases", json=body((P1, "long_lasting"))), 200, "ShoppingTrip")
+    fail(client.post(f"{url}/purchases", json=body((P1, "long_lasting"), v=2)), 409, "invalid_transition")  # already bought
+    fail(client.post(f"{url}/purchases/undo", json=body((P1, "long_lasting"), v=9)), 409, "stale_version")
+    assert ok(client.get(url), 200, "ShoppingTrip")["version"] == 2  # failures changed nothing
+    for bad in (
+        {}, {"expected_version": 2}, {"cells": cells((P1, "long_lasting"))},
+        {"expected_version": 2, "cells": []}, {"expected_version": 2, "cells": "x"},
+        {"expected_version": 2, "cells": cells((P1, "long_lasting"), (P1, "long_lasting"))},
+        {"expected_version": 2, "cells": cells((P1, "frozen"))},
+        {"expected_version": 2, "cells": [{"plan_id": P1}]},
+        {"expected_version": 2, "cells": [{"plan_id": P1, "group": "fresh", "x": 1}]},
+        {"expected_version": 2, "cells": [{"plan_id": "bad id!", "group": "fresh"}]},
+        {"expected_version": 2, "cells": cells((P1, "fresh")), "extra": 1},
+    ):
+        fail(client.post(f"{url}/purchases", json=bad), 400, "invalid_request")
+        fail(client.post(f"{url}/purchases/undo", json=bad), 400, "invalid_request")

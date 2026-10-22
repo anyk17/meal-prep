@@ -74,29 +74,48 @@ export function normalizeError(code, message, details = []) { return new ReaderE
 
 // ---- Shopping trips (phase 4) ----
 const UNITS = ['g', 'ml', 'units'];
-const tripWeekKeys = ['plan_id','week_start','week_end','revision','snapshot_id','current_revision','groups','coverage','changed_since_shopping'];
+const tripWeekKeys = ['plan_id','week_start','week_end','current_revision','groups','cells'];
 const SHELF_LIVES = ['long_lasting', 'fresh'];
 // Non-empty, unique, in canonical order (long_lasting before fresh).
 const validGroups = g => Array.isArray(g) && g.length > 0 && g.every(x => SHELF_LIVES.includes(x)) && new Set(g).size === g.length && g.every((x, i) => i === 0 || SHELF_LIVES.indexOf(g[i - 1]) < SHELF_LIVES.indexOf(x));
-const tripKeys = ['trip_id','name','status','version','created_at','updated_at','completed_at','weeks','items'];
+const tripKeys = ['trip_id','name','status','version','created_at','updated_at','completed_at','weeks','items','bought_items'];
+const cellKeys = ['group','state','bought_at','revision','snapshot_id','changed_since_shopping'];
+// One (week, group) cell. A bought cell freezes a revision and snapshot and carries its time; a to-buy cell has no time and is never "changed".
+function validCell(cell, week) {
+  if (!exactKeys(cell, cellKeys) || !['to_buy', 'bought'].includes(cell.state) || typeof cell.changed_since_shopping !== 'boolean') return false;
+  const revisionOk = cell.revision === null || (Number.isInteger(cell.revision) && cell.revision >= 1);
+  const snapshotOk = cell.snapshot_id === null || (typeof cell.snapshot_id === 'string' && cell.snapshot_id !== '');
+  if (!revisionOk || !snapshotOk) return false;
+  if (cell.state === 'to_buy') return cell.bought_at === null && !cell.changed_since_shopping;
+  return validTimestamp(cell.bought_at) && cell.revision !== null && cell.snapshot_id !== null && cell.changed_since_shopping === (week.current_revision > cell.revision);
+}
+function validateTripItem(i, planIds, field) {
+  const keys = ['ingredient_id','display','quantity','unit','section','shelf_life','quantity_by_plan'];
+  const shape = object(i) && keys.every(key => key in i) && Object.keys(i).every(key => keys.includes(key) || key === 'plan_ids');
+  if (!shape || typeof i.ingredient_id !== 'string' || !i.ingredient_id || typeof i.display !== 'string' || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || i.quantity < 0 || !UNITS.includes(i.unit) || typeof i.section !== 'string' || !SHELF_LIVES.includes(i.shelf_life)) fail(`Invalid shopping trip item in ${field}`);
+  if (!object(i.quantity_by_plan) || !Object.keys(i.quantity_by_plan).length || Object.entries(i.quantity_by_plan).some(([id, q]) => !planIds.has(id) || typeof q !== 'number' || !Number.isFinite(q) || q < 0)) fail(`Invalid quantity_by_plan in ${field}`);
+  if ('plan_ids' in i && (!Array.isArray(i.plan_ids) || i.plan_ids.some(id => !planIds.has(id)))) fail(`Invalid plan_ids in ${field}`);
+}
 export function validateTrip(t) {
-  if (!exactKeys(t, tripKeys) || !idPattern.test(t.trip_id || '') || typeof t.name !== 'string' || !t.name || t.name.length > 80 || !['open','done'].includes(t.status) || !Number.isInteger(t.version) || t.version < 1 || !validTimestamp(t.created_at) || !validTimestamp(t.updated_at) || !Array.isArray(t.weeks) || !t.weeks.length || !Array.isArray(t.items)) fail('Invalid shopping trip');
+  if (!exactKeys(t, tripKeys) || !idPattern.test(t.trip_id || '') || typeof t.name !== 'string' || !t.name || t.name.length > 80 || !['open','done'].includes(t.status) || !Number.isInteger(t.version) || t.version < 1 || !validTimestamp(t.created_at) || !validTimestamp(t.updated_at) || !Array.isArray(t.weeks) || !t.weeks.length || !Array.isArray(t.items) || !Array.isArray(t.bought_items)) fail('Invalid shopping trip');
   if (t.status === 'open' ? t.completed_at !== null : !validTimestamp(t.completed_at)) fail('Shopping trip completion time does not match its status');
   const planIds = new Set();
-  let previous = '';
+  let previous = '', allBought = true;
   for (const w of t.weeks) {
-    if (!exactKeys(w, tripWeekKeys) || !idPattern.test(w.plan_id || '') || !validDate(w.week_start) || !validDate(w.week_end) || w.week_end !== addDays(w.week_start, 6) || weekDay(w.week_start) !== 1 || !Number.isInteger(w.revision) || w.revision < 1 || !Number.isInteger(w.current_revision) || w.current_revision < 1 || typeof w.snapshot_id !== 'string' || !w.snapshot_id || typeof w.changed_since_shopping !== 'boolean' || !validGroups(w.groups)) fail('Invalid shopping trip week');
+    if (!exactKeys(w, tripWeekKeys) || !idPattern.test(w.plan_id || '') || !validDate(w.week_start) || !validDate(w.week_end) || w.week_end !== addDays(w.week_start, 6) || weekDay(w.week_start) !== 1 || !Number.isInteger(w.current_revision) || w.current_revision < 1 || !validGroups(w.groups)) fail('Invalid shopping trip week');
     if (w.week_start <= previous || planIds.has(w.plan_id)) fail('Shopping trip weeks must be unique and ordered by week start');
     previous = w.week_start; planIds.add(w.plan_id);
-    if (w.coverage !== (t.status === 'open' ? 'on_list' : 'covered')) fail('Shopping trip week coverage does not match the trip status');
-    if (t.status === 'open' && w.revision !== w.current_revision) fail('An open trip must use the current revision of each week');
-    if (w.changed_since_shopping !== (t.status === 'done' && w.current_revision > w.revision)) fail('Shopping trip week change flag does not match its revisions');
+    if (!Array.isArray(w.cells) || w.cells.length !== w.groups.length || w.cells.some((cell, index) => cell?.group !== w.groups[index] || !validCell(cell, w))) fail('Shopping trip week cells do not match its groups');
+    if (w.cells.some(cell => cell.state !== 'bought')) allBought = false;
   }
-  const seen = new Set();
-  for (const i of t.items) {
-    if (!exactKeys(i, ['ingredient_id','display','quantity','unit','section','shelf_life','plan_ids']) || typeof i.ingredient_id !== 'string' || !i.ingredient_id || typeof i.display !== 'string' || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || i.quantity < 0 || !UNITS.includes(i.unit) || typeof i.section !== 'string' || !SHELF_LIVES.includes(i.shelf_life) || !Array.isArray(i.plan_ids) || !i.plan_ids.length || i.plan_ids.some(id => !planIds.has(id)) || new Set(i.plan_ids).size !== i.plan_ids.length) fail('Invalid shopping trip item');
-    const key = `${i.ingredient_id}\u0000${i.unit}`;
-    if (seen.has(key)) fail('Duplicate shopping trip item'); seen.add(key);
+  if (t.status !== (allBought ? 'done' : 'open')) fail('Shopping trip status does not match its cells');
+  for (const [field, list] of [['items', t.items], ['bought_items', t.bought_items]]) {
+    const seen = new Set();
+    for (const i of list) {
+      validateTripItem(i, planIds, field);
+      const key = `${i.ingredient_id}\u0000${i.unit}`;
+      if (seen.has(key)) fail(`Duplicate shopping trip item in ${field}`); seen.add(key);
+    }
   }
 }
 export function validateTripList(result) {
@@ -110,9 +129,9 @@ export function validateTripList(result) {
   }
 }
 function validGroupCoverage(g) {
-  return exactKeys(g, ['coverage', 'trip_id', 'changed_since_shopping']) && ['not_covered', 'on_list', 'covered'].includes(g.coverage)
+  return exactKeys(g, ['coverage', 'trip_id', 'changed_since_shopping']) && ['not_covered', 'to_buy', 'bought'].includes(g.coverage)
     && (g.coverage === 'not_covered' ? g.trip_id === null : idPattern.test(g.trip_id || ''))
-    && typeof g.changed_since_shopping === 'boolean' && (!g.changed_since_shopping || g.coverage === 'covered');
+    && typeof g.changed_since_shopping === 'boolean' && (!g.changed_since_shopping || g.coverage === 'bought');
 }
 export function validateCoverage(result) {
   if (!result || Object.keys(result).join(',') !== 'items' || !Array.isArray(result.items)) fail('Invalid coverage response');
@@ -128,7 +147,8 @@ export function deriveCoverage(planSummaries, trips, range) {
   for (const trip of trips) for (const week of trip.weeks) for (const group of week.groups) byPair.set(`${week.plan_id}|${group}`, { trip, week });
   const groupCoverage = (planId, group) => {
     const hit = byPair.get(`${planId}|${group}`);
-    return { coverage: hit ? hit.week.coverage : 'not_covered', trip_id: hit ? hit.trip.trip_id : null, changed_since_shopping: hit ? hit.week.changed_since_shopping : false };
+    const cell = hit?.week.cells.find(entry => entry.group === group);
+    return { coverage: cell ? cell.state : 'not_covered', trip_id: hit ? hit.trip.trip_id : null, changed_since_shopping: cell ? cell.changed_since_shopping : false };
   };
   const items = planSummaries.filter(s => s.week_start <= range.to && s.week_end >= range.from).sort((a, b) => a.week_start.localeCompare(b.week_start)).map(s => ({
     plan_id: s.plan_id, week_start: s.week_start, week_end: s.week_end,

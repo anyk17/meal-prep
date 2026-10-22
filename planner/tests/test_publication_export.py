@@ -219,10 +219,12 @@ def test_done_trip_is_frozen_to_covered_revision(env: Env, full_validator) -> No
     revisions = {e["summary"]["plan_id"]: e["summary"]["revision"] for e in manifest["plans"]}
     assert revisions[P_OCT26] == 2
     out = read_json(base / "shopping-trips" / f"{tid}.json")
-    assert out["status"] == "done" and out["items"] == frozen_items
+    assert out["status"] == "done" and out["items"] == [] and out["bought_items"] == frozen_items
     week = out["weeks"][0]
-    assert (week["plan_id"], week["revision"], week["current_revision"]) == (P_OCT26, 1, 2)
-    assert week["changed_since_shopping"] is True
+    assert (week["plan_id"], week["current_revision"]) == (P_OCT26, 2)
+    assert [(c["state"], c["revision"], c["changed_since_shopping"]) for c in week["cells"]] == [
+        ("bought", 1, True), ("bought", 1, True)
+    ]
 
 
 def test_open_trip_follows_current_revision(env: Env, full_validator) -> None:
@@ -230,7 +232,8 @@ def test_open_trip_follows_current_revision(env: Env, full_validator) -> None:
     env.new_revision(P_OCT26)
     result = env.service(full_validator).export(["2026-10"])
     out = read_json(published(env, result) / "shopping-trips" / f"{tid}.json")
-    assert out["weeks"][0]["revision"] == 2
+    assert out["weeks"][0]["current_revision"] == 2
+    assert all(c["state"] == "to_buy" and c["revision"] is None for c in out["weeks"][0]["cells"])
 
 
 def test_check_bundle_catches_incoherence(env: Env) -> None:
@@ -241,8 +244,8 @@ def test_check_bundle_catches_incoherence(env: Env) -> None:
 
     files = copy.deepcopy(dict(bundle.files))
     trip_file = next(k for k in files if k.startswith("shopping-trips/"))
-    files[trip_file]["weeks"][0]["revision"] += 1
-    assert any("open week" in e for e in check_bundle(bundle.index, files))
+    files[trip_file]["weeks"][0]["current_revision"] += 1
+    assert any("current_revision" in e for e in check_bundle(bundle.index, files))
     files = copy.deepcopy(dict(bundle.files))
     files["shopping-trips/stray.json"] = {}
     assert any("unreferenced" in e for e in check_bundle(bundle.index, files))

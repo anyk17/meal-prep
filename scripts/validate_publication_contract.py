@@ -232,8 +232,14 @@ def validate_trips(
         if trip_errors or not isinstance(trip, dict):
             continue
         checks.require(trip["trip_id"] == trip_id, f"{file_label}: trip_id must match its manifest entry")
+        states = [c["state"] for w in trip["weeks"] for c in w["cells"]]
+        is_done = bool(states) and all(st == "bought" for st in states)
         checks.require(
-            (trip["status"] == "done") == (trip["completed_at"] is not None),
+            (trip["status"] == "done") == is_done,
+            f"{file_label}: status must be done exactly when every cell is bought",
+        )
+        checks.require(
+            (trip["completed_at"] is not None) == is_done,
             f"{file_label}: completed_at must be set exactly when the trip is done",
         )
         weeks = trip["weeks"]
@@ -243,7 +249,7 @@ def validate_trips(
         )
         week_ids = [w["plan_id"] for w in weeks]
         checks.require(len(set(week_ids)) == len(week_ids), f"{file_label}: week plan_ids must be unique")
-        for item in trip["items"]:
+        for item in [*trip["items"], *trip["bought_items"]]:
             known = labels.setdefault(item["ingredient_id"], item["shelf_life"])
             checks.require(
                 known == item["shelf_life"],
@@ -271,43 +277,76 @@ def validate_trips(
                 f"{file_label}: week {plan_id} dates must match the published plan",
             )
             checks.require(
-                week["current_revision"] >= week["revision"],
-                f"{file_label}: week {plan_id} current_revision must not be below revision",
+                week["current_revision"] == summary["revision"],
+                f"{file_label}: week {plan_id} current_revision must be the published plan revision",
             )
-            if trip["status"] == "open":
-                checks.require(
-                    week["revision"] == summary["revision"] and week["snapshot_id"] == summary["snapshot_id"],
-                    f"{file_label}: open trip week {plan_id} must use the published plan revision and snapshot_id",
-                )
-            else:
-                checks.require(
-                    week["revision"] <= summary["revision"],
-                    f"{file_label}: done trip week {plan_id} revision must not exceed the published plan revision",
-                )
-                if week["revision"] == summary["revision"]:
+            checks.require(
+                [c["group"] for c in week["cells"]] == groups,
+                f"{file_label}: week {plan_id} cells must match its groups, in order",
+            )
+            for cell in week["cells"]:
+                where = f"{file_label}: cell {plan_id} ({cell['group']})"
+                frozen = (cell["bought_at"], cell["revision"], cell["snapshot_id"])
+                if cell["state"] == "to_buy":
                     checks.require(
-                        week["snapshot_id"] == summary["snapshot_id"],
-                        f"{file_label}: done trip week {plan_id} snapshot_id must match the published plan at the same revision",
+                        all(v is None for v in frozen) and not cell["changed_since_shopping"],
+                        f"{where}: a to-buy cell has no bought_at, revision or snapshot_id",
                     )
-        # Items are checkable only when every week's items come from the published shopping list.
-        if all(
-            w["plan_id"] in shopping_by_plan
-            and w["revision"] == shopping_by_plan[w["plan_id"]].get("revision")
-            for w in weeks
-        ):
+                    continue
+                checks.require(
+                    all(v is not None for v in frozen),
+                    f"{where}: a bought cell needs bought_at, revision and snapshot_id",
+                )
+                if cell["revision"] is None:
+                    continue
+                checks.require(
+                    cell["revision"] <= summary["revision"],
+                    f"{where}: revision must not exceed the published plan revision",
+                )
+                checks.require(
+                    cell["changed_since_shopping"] == (summary["revision"] > cell["revision"]),
+                    f"{where}: changed_since_shopping must say whether the plan moved past the bought revision",
+                )
+                if cell["revision"] == summary["revision"]:
+                    checks.require(
+                        cell["snapshot_id"] == summary["snapshot_id"],
+                        f"{where}: snapshot_id must match the published plan at the same revision",
+                    )
+        # To-buy items always come from the published (current) shopping lists; bought items are
+        # checkable only when every bought cell sits at the published revision.
+        if all(w["plan_id"] in shopping_by_plan for w in weeks):
             item_checks.append((file_label, trip))
     # Item sums need every trip's labels, so they run after all trips are read. A row whose
     # ingredient no trip item labels belongs to a group no list buys and is skipped.
     for file_label, trip in item_checks:
         expected_items = trip_domain.sum_items(
-            [(w["plan_id"], shopping_by_plan[w["plan_id"]], w["groups"]) for w in trip["weeks"]],
+            trip_domain.merge_cells(
+                (w["plan_id"], None, shopping_by_plan[w["plan_id"]], c["group"])
+                for w in trip["weeks"]
+                for c in w["cells"]
+                if c["state"] == "to_buy"
+            ),
             labels,
             skip_unlabeled=True,
         )
         checks.require(
             trip["items"] == expected_items,
-            f"{file_label}: items must equal the sum of the covered groups' rows of the weeks' shopping lists",
+            f"{file_label}: items must equal the sum of the to-buy cells' rows of the weeks' shopping lists",
         )
+        bought = [(w, c) for w in trip["weeks"] for c in w["cells"] if c["state"] == "bought"]
+        if all(c["revision"] == shopping_by_plan[w["plan_id"]].get("revision") for w, c in bought):
+            expected_bought = trip_domain.sum_items(
+                trip_domain.merge_cells(
+                    (w["plan_id"], c["revision"], shopping_by_plan[w["plan_id"]], c["group"])
+                    for w, c in bought
+                ),
+                labels,
+                skip_unlabeled=True,
+            )
+            checks.require(
+                trip["bought_items"] == expected_bought,
+                f"{file_label}: bought_items must equal the sum of the bought cells' rows of the weeks' shopping lists",
+            )
 
 
 def validate_bundle(
@@ -596,12 +635,8 @@ def self_test(bundle_root: Path) -> None:
     def mutate_trip(transform: Callable[[dict[str, Any]], Any]) -> Callable[[Path], Any]:
         return lambda root: mutate_json(trip_file(root), transform)
 
-    def mark_done(trip: dict[str, Any]) -> None:
-        trip.update(status="done", completed_at="2026-10-22T10:00:00+00:00")
-
     def done_week_too_new(trip: dict[str, Any]) -> None:
-        mark_done(trip)
-        trip["weeks"][0]["revision"] += 1
+        trip["weeks"][0]["cells"][0]["revision"] += 1
         trip["weeks"][0]["current_revision"] += 1
 
     def week_not_published(trip: dict[str, Any]) -> None:
@@ -616,9 +651,21 @@ def self_test(bundle_root: Path) -> None:
         shutil.copy(trip_file(root), trip_file(root).with_name("trip_zzz.json"))
         mutate_json(trip_file(root).with_name("trip_zzz.json"), lambda x: x.update(trip_id="trip_zzz"))
 
-    tests.append(("open trip revision mismatch", mutate_trip(lambda t: t["weeks"][0].update(revision=t["weeks"][0]["revision"] + 1, current_revision=t["weeks"][0]["current_revision"] + 1)), "open trip week"))
-    tests.append(("open trip snapshot mismatch", mutate_trip(lambda t: t["weeks"][0].update(snapshot_id="sha256:" + "1" * 64)), "open trip week"))
-    tests.append(("done trip revision above published", mutate_trip(done_week_too_new), "revision must not exceed the published plan revision"))
+    def first_bought(trip: dict[str, Any]) -> dict[str, Any]:
+        return next(c for w in trip["weeks"] for c in w["cells"] if c["state"] == "bought")
+
+    def first_to_buy(trip: dict[str, Any]) -> dict[str, Any]:
+        return next(c for w in trip["weeks"] for c in w["cells"] if c["state"] == "to_buy")
+
+    tests.append(("trip current_revision mismatch", mutate_trip(lambda t: t["weeks"][0].update(current_revision=t["weeks"][0]["current_revision"] + 1)), "current_revision must be the published plan revision"))
+    tests.append(("bought cell snapshot mismatch", mutate_trip(lambda t: first_bought(t).update(snapshot_id="sha256:" + "1" * 64)), "snapshot_id must match the published plan"))
+    tests.append(("bought cell revision above published", mutate_trip(done_week_too_new), "revision must not exceed the published plan revision"))
+    tests.append(("bought cell changed flag wrong", mutate_trip(lambda t: first_bought(t).update(changed_since_shopping=True)), "changed_since_shopping must say"))
+    tests.append(("to-buy cell with frozen revision", mutate_trip(lambda t: first_to_buy(t).update(revision=1)), "a to-buy cell has no bought_at"))
+    tests.append(("bought cell without bought_at", mutate_trip(lambda t: first_bought(t).update(bought_at=None)), "a bought cell needs bought_at"))
+    tests.append(("done status with a to-buy cell", mutate_trip(lambda t: t.update(status="done", completed_at="2026-10-22T10:00:00+00:00")), "status must be done exactly when every cell is bought"))
+    tests.append(("completed_at while open", mutate_trip(lambda t: t.update(completed_at="2026-10-22T10:00:00+00:00")), "completed_at must be set exactly when the trip is done"))
+    tests.append(("bought items not summed", mutate_trip(lambda t: t["bought_items"][0].update(quantity=t["bought_items"][0]["quantity"] + 1)), "bought_items must equal the sum"))
     tests.append(("trip week without published plan", mutate_trip(week_not_published), "has no entry in manifest plans"))
     tests.append(("trip id mismatch", mutate_trip(lambda t: t.update(trip_id="trip_other")), "trip_id must match its manifest entry"))
     tests.append(("trip items not summed", mutate_trip(lambda t: t["items"][0].update(quantity=t["items"][0]["quantity"] + 1)), "items must equal the sum"))

@@ -1,7 +1,10 @@
 """ShoppingTrip aggregate (UI: "shopping list"): invariants, item summation, week coverage.
 
 A trip covers a set of weekly plans, each per shelf-life group (long_lasting, fresh), and
-answers "what do we buy for these weeks?". It never modifies a plan. Everything here is pure:
+answers "what do we buy for these weeks?". Each (plan, group) is a cell, ``to_buy`` or
+``bought``; a bought cell freezes the plan revision it was bought at. The trip status
+(open/done) and completed_at are derived from its cells. It never modifies a plan.
+Everything here is pure:
 mutations return a new trip with ``version + 1``; storage enforces the same invariants (one trip
 per (plan, group), version compare-and-swap) atomically.
 """
@@ -19,8 +22,8 @@ OPEN = "open"
 DONE = "done"
 
 NOT_COVERED = "not_covered"
-ON_LIST = "on_list"
-COVERED = "covered"
+TO_BUY = "to_buy"
+BOUGHT = "bought"
 
 LONG_LASTING = ShelfLife.LONG_LASTING.value
 FRESH = ShelfLife.FRESH.value
@@ -58,12 +61,8 @@ class WeekAlreadyOnTrip(TripError):
         self.group = group
 
 
-class TripDone(TripError):
-    """The action needs an open trip; reopen the done trip first."""
-
-
-class TripNotDone(TripError):
-    """The action needs a done trip (reopen on an open trip, or mark done twice)."""
+class InvalidTransition(TripError):
+    """A cell is already in the requested state (or there is no cell to move)."""
 
 
 class WeekNotOnTrip(TripError):
@@ -84,17 +83,38 @@ MAX_NAME_LENGTH = 80
 
 
 @dataclass(frozen=True)
+class TripCell:
+    """One (week, group) on the list. bought_at/revision/snapshot_id are set exactly when bought."""
+
+    group: str
+    state: str = TO_BUY
+    bought_at: datetime | None = None
+    revision: int | None = None
+    snapshot_id: str | None = None
+
+
+@dataclass(frozen=True)
 class TripWeek:
-    """One covered week with the groups of it on the list. covered_* are set exactly when done."""
+    """One covered week. Pass groups (all to buy) or cells; groups always follows cells."""
 
     plan_id: str
     week_start: date
-    covered_revision: int | None = None
-    covered_snapshot_id: str | None = None
     groups: tuple[str, ...] = GROUPS  # non-empty, canonical order
+    cells: tuple[TripCell, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "groups", clean_groups(self.groups))
+        if self.cells:
+            by_group = {c.group: c for c in self.cells}
+            groups = clean_groups(by_group)
+            object.__setattr__(self, "cells", tuple(by_group[g] for g in groups))
+            object.__setattr__(self, "groups", groups)
+        else:
+            groups = clean_groups(self.groups)
+            object.__setattr__(self, "groups", groups)
+            object.__setattr__(self, "cells", tuple(TripCell(g) for g in groups))
+
+    def cell(self, group: str) -> TripCell | None:
+        return next((c for c in self.cells if c.group == group), None)
 
 
 def clean_groups(groups: Iterable[str] | None) -> tuple[str, ...]:
@@ -111,12 +131,27 @@ def clean_groups(groups: Iterable[str] | None) -> tuple[str, ...]:
 class ShoppingTrip:
     trip_id: str
     name: str | None  # a user-chosen name; None means "named after its weeks"
-    status: str  # OPEN | DONE
     version: int
     created_at: datetime
     updated_at: datetime
     weeks: tuple[TripWeek, ...]  # sorted by week_start
-    completed_at: datetime | None = None
+
+    @property
+    def all_cells(self) -> tuple[tuple[TripWeek, TripCell], ...]:
+        return tuple((w, c) for w in self.weeks for c in w.cells)
+
+    @property
+    def status(self) -> str:
+        """done when every cell is bought, else open."""
+        cells = self.all_cells
+        return DONE if cells and all(c.state == BOUGHT for _, c in cells) else OPEN
+
+    @property
+    def completed_at(self) -> datetime | None:
+        """The latest bought_at while done, else None."""
+        if self.status != DONE:
+            return None
+        return max(c.bought_at for _, c in self.all_cells if c.bought_at is not None)
 
     @property
     def plan_ids(self) -> tuple[str, ...]:
@@ -165,7 +200,7 @@ def new_trip(
     if len({w.plan_id for w in weeks}) != len(weeks):
         raise InvalidTrip("plan_ids must be unique")
     open_weeks = _sorted_weeks(TripWeek(w.plan_id, w.week_start, groups=w.groups) for w in weeks)
-    return ShoppingTrip(trip_id, clean_name(name), OPEN, 1, now, now, open_weeks)
+    return ShoppingTrip(trip_id, clean_name(name), 1, now, now, open_weeks)
 
 
 def require_version(trip: ShoppingTrip, expected: int) -> None:
@@ -178,10 +213,10 @@ def _bump(trip: ShoppingTrip, now: datetime, **changes: object) -> ShoppingTrip:
 
 
 def add_week(trip: ShoppingTrip, week: TripWeek, expected: int, now: datetime) -> ShoppingTrip:
-    """Add the week's groups; a week already on the list is extended with the new groups."""
+    """Add the week's groups as to-buy cells (any state; a done list becomes open).
+
+    A week already on the list is extended with the groups it lacks."""
     require_version(trip, expected)
-    if trip.status == DONE:
-        raise TripDone("trip is done; reopen it to change its weeks")
     existing = next((w for w in trip.weeks if w.plan_id == week.plan_id), None)
     if existing is None:
         return _bump(
@@ -191,7 +226,7 @@ def add_week(trip: ShoppingTrip, week: TripWeek, expected: int, now: datetime) -
     new = [g for g in week.groups if g not in existing.groups]
     if not new:  # nothing to add: every requested group is already on this list
         raise WeekAlreadyOnTrip(week.plan_id, trip.trip_id, week.groups[0])
-    merged = replace(existing, groups=clean_groups((*existing.groups, *new)))
+    merged = replace(existing, cells=(*existing.cells, *(TripCell(g) for g in new)))
     return _bump(trip, now, weeks=_sorted_weeks(merged if w is existing else w for w in trip.weeks))
 
 
@@ -200,44 +235,80 @@ def remove_week(
 ) -> ShoppingTrip:
     """Remove the whole week, or one group of it (the week goes when no group is left)."""
     require_version(trip, expected)
-    if trip.status == DONE:
-        raise TripDone("trip is done; reopen it to remove a week")
     week = next((w for w in trip.weeks if w.plan_id == plan_id), None)
     if week is None or (group is not None and group not in week.groups):
         raise WeekNotOnTrip(plan_id)
     if group is not None and group not in GROUPS:
         raise InvalidTrip(f"group must be one of {', '.join(GROUPS)}")
-    left = tuple(g for g in week.groups if g != group) if group is not None else ()
+    left = tuple(c for c in week.cells if c.group != group) if group is not None else ()
     if not left and len(trip.weeks) == 1:
         raise LastWeek("a trip needs at least one week; delete the trip instead")
     others = tuple(w for w in trip.weeks if w.plan_id != plan_id)
-    kept = (replace(week, groups=left),) if left else ()
+    kept = (replace(week, cells=left),) if left else ()
     return _bump(trip, now, weeks=_sorted_weeks((*others, *kept)))
 
 
-def mark_done(
+CellRef = tuple[str, str]  # (plan_id, group)
+
+
+def _targets(trip: ShoppingTrip, refs: Sequence[CellRef], state: str) -> list[CellRef]:
+    """Validate refs: non-empty, unique, on the trip (WeekNotOnTrip), not already in `state`."""
+    if not refs:
+        raise InvalidTrip("cells must list at least one (plan_id, group)")
+    if len(set(refs)) != len(refs):
+        raise InvalidTrip("cells must be unique")
+    for plan_id, group in refs:
+        week = next((w for w in trip.weeks if w.plan_id == plan_id), None)
+        cell = week.cell(group) if week else None
+        if cell is None:
+            raise WeekNotOnTrip(plan_id)
+    for plan_id, group in refs:
+        cell = next(w for w in trip.weeks if w.plan_id == plan_id).cell(group)
+        assert cell is not None
+        if cell.state == state:
+            raise InvalidTransition(f"{plan_id} ({group}) is already {state}")
+    return list(refs)
+
+
+def _with_cells(
+    trip: ShoppingTrip, now: datetime, change: Mapping[CellRef, TripCell]
+) -> ShoppingTrip:
+    weeks = tuple(
+        replace(w, cells=tuple(change.get((w.plan_id, c.group), c) for c in w.cells))
+        for w in trip.weeks
+    )
+    return _bump(trip, now, weeks=weeks)
+
+
+def mark_bought(
     trip: ShoppingTrip,
-    covered: Mapping[str, tuple[int, str]],
+    refs: Sequence[CellRef],
+    frozen: Mapping[str, tuple[int, str]],
     expected: int,
     now: datetime,
 ) -> ShoppingTrip:
-    """Freeze the trip to covered[plan_id] = (revision, snapshot_id) for every week."""
+    """Mark cells bought, freezing frozen[plan_id] = (revision, snapshot_id) for each.
+
+    All or nothing: WeekNotOnTrip for an unknown cell, InvalidTransition if one is already bought."""
     require_version(trip, expected)
-    if trip.status == DONE:
-        raise TripNotDone("trip is already done")
-    weeks = tuple(
-        TripWeek(w.plan_id, w.week_start, covered[w.plan_id][0], covered[w.plan_id][1], w.groups)
-        for w in trip.weeks
-    )
-    return _bump(trip, now, status=DONE, weeks=weeks, completed_at=now)
+    targets = _targets(trip, refs, BOUGHT)
+    return _with_cells(
+        trip, now,
+        {(p, g): TripCell(g, BOUGHT, now, frozen[p][0], frozen[p][1]) for p, g in targets},
+    )  # fmt: skip
 
 
-def reopen(trip: ShoppingTrip, expected: int, now: datetime) -> ShoppingTrip:
+def unmark_bought(
+    trip: ShoppingTrip, refs: Sequence[CellRef], expected: int, now: datetime
+) -> ShoppingTrip:
+    """Return bought cells to to-buy (current revision again)."""
     require_version(trip, expected)
-    if trip.status == OPEN:
-        raise TripNotDone("trip is not done")
-    weeks = tuple(TripWeek(w.plan_id, w.week_start, groups=w.groups) for w in trip.weeks)
-    return _bump(trip, now, status=OPEN, weeks=weeks, completed_at=None)
+    targets = _targets(trip, refs, TO_BUY)
+    return _with_cells(trip, now, {(p, g): TripCell(g) for p, g in targets})
+
+
+def cells_in_state(trip: ShoppingTrip, state: str) -> list[CellRef]:
+    return [(w.plan_id, c.group) for w, c in trip.all_cells if c.state == state]
 
 
 # ---------------------------------------------------------------- derived views
@@ -252,7 +323,8 @@ def sum_items(
     """Sum saved weekly grocery rows per (ingredient_id, unit), only for each week's covered groups.
 
     weeks is [(plan_id, shopping_list, groups)] in week order; labels maps ingredient_id to its
-    shelf life. Each item carries its shelf_life and the plan_ids that contribute. Rows keep
+    shelf life. Each item carries its shelf_life, the plan_ids that contribute and quantity_by_plan
+    (per-plan quantities rounded to 2 decimals; quantity is exactly their sum). Rows keep
     first-seen order, grouped by first-seen section. No pantry logic: the weekly rows already
     reflect their captured pantry. An ingredient without a label is an error, or skipped with
     skip_unlabeled (publication checks that only know the labels the bundle shows).
@@ -281,25 +353,39 @@ def sum_items(
                         "section": line["section"],
                         "shelf_life": label,
                         "plan_ids": [],
+                        "quantity_by_plan": {},
                     }
-                item["quantity"] += line["quantity"]
+                by_plan = item["quantity_by_plan"]
+                by_plan[plan_id] = by_plan.get(plan_id, 0.0) + line["quantity"]
                 if plan_id not in item["plan_ids"]:
                     item["plan_ids"].append(plan_id)
     items = list(totals.values())
     for item in items:
-        item["quantity"] = round(item["quantity"], 2)
+        by_plan = {p: round(q, 2) for p, q in item["quantity_by_plan"].items()}
+        item["quantity_by_plan"] = by_plan
+        item["quantity"] = round(sum(by_plan.values()), 2)
     items.sort(key=lambda i: section_order[i["section"]])  # stable
     return items
 
 
-def week_coverage(
-    plan_id: str, current_revision: int, trip: ShoppingTrip | None
-) -> tuple[str, bool]:
-    """(coverage, changed_since_shopping) for one (plan, group) given the trip that holds it, if any."""
-    if trip is None:
+def merge_cells(
+    cells: Iterable[tuple[str, int | None, JsonObject, str]],
+) -> list[tuple[str, JsonObject, list[str]]]:
+    """Group (plan_id, revision, shopping_list, group) cells into sum_items entries.
+
+    Cells of one plan at the same revision share one entry, so item order matches a single pass
+    over that week's rows (the view and the publication check must agree on it)."""
+    merged: dict[tuple[str, int | None], tuple[str, JsonObject, list[str]]] = {}
+    for plan_id, revision, shopping, group in cells:
+        entry = merged.setdefault((plan_id, revision), (plan_id, shopping, []))
+        entry[2].append(group)
+    return list(merged.values())
+
+
+def week_coverage(current_revision: int, cell: TripCell | None) -> tuple[str, bool]:
+    """(coverage, changed_since_shopping) for one (plan, group) given its cell, if on a trip."""
+    if cell is None:
         return NOT_COVERED, False
-    if trip.status == OPEN:
-        return ON_LIST, False
-    week = next(w for w in trip.weeks if w.plan_id == plan_id)
-    covered = week.covered_revision
-    return COVERED, covered is not None and current_revision > covered
+    if cell.state == TO_BUY:
+        return TO_BUY, False
+    return BOUGHT, cell.revision is not None and current_revision > cell.revision
