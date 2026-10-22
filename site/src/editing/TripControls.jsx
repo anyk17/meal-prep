@@ -47,6 +47,7 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
   const [addPlanId, setAddPlan] = useState('');
   const [tripNames, setTripNames] = useState(() => new Map());
   const [info, setInfo] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const open = trip.status === 'open';
 
   useEffect(() => {
@@ -81,9 +82,7 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
     else if (plan.skipped.length) setInfo(addedMessage(formatWeekRange(item.week_start), plan.groups, plan.skipped));
     if (outcome.trip) onTrip(outcome.trip);
   };
-  const confirmDelete = () => {
-    if (window.confirm(`Delete the shopping list "${trip.name}"? Its weeks become uncovered. Plans are not changed.`)) void act(() => getEditor().deleteTrip(trip.trip_id, trip.version));
-  };
+  const deleteTrip = () => { setConfirmingDelete(false); void act(() => getEditor().deleteTrip(trip.trip_id, trip.version)); };
 
   return (
     <div className="space-y-3 border-t border-slate-100 dark:border-slate-800 pt-3" data-testid="trip-controls">
@@ -93,8 +92,17 @@ export default function TripControls({ trip, reader, onTrip, onDeleted }) {
         {open
           ? <button className={btnPrimary} disabled={busy} onClick={() => act(() => getEditor().markTripDone(trip.trip_id, trip.version))}>Shopping done</button>
           : <button className={btnPrimary} disabled={busy} onClick={() => act(() => getEditor().reopenTrip(trip.trip_id, trip.version))}>Reopen</button>}
-        <button className={btnDanger} disabled={busy} onClick={confirmDelete}>Delete</button>
+        {!confirmingDelete && <button className={btnDanger} disabled={busy} onClick={() => setConfirmingDelete(true)}>Delete</button>}
       </div>
+      {confirmingDelete && (
+        <div role="alertdialog" aria-label="Confirm delete" className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm space-y-2 text-red-900 dark:text-red-100">
+          <p>Delete the shopping list "{trip.name}"? Its weeks become uncovered. Meal plans are not changed.</p>
+          <div className="flex gap-2">
+            <button className={`${btn} bg-red-600 text-white hover:bg-red-500`} disabled={busy} onClick={deleteTrip}>Yes, delete</button>
+            <button className={btnQuiet} disabled={busy} onClick={() => setConfirmingDelete(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
       {open && (
         <div className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Edit weeks</h3>
