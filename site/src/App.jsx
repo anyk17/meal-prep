@@ -68,6 +68,8 @@ function App() {
   const [selectedPlans, setSelectedPlans] = useState([]);
   const [newListHint, setNewListHint] = useState(false);
   const [monthCoverage, setMonthCoverage] = useState(() => new Map());
+  // Keep every month seen so far: ticked weeks can span months (tick in October, then more in November).
+  const mergeMonthCoverage = useCallback(next => setMonthCoverage(previous => new Map([...previous, ...next])), []);
   const [review, setReview] = useState(null);
   const [swapSlot, setSwapSlot] = useState(null);
   const [swapNotice, setSwapNotice] = useState(null);
@@ -297,7 +299,7 @@ function App() {
         )}
         {view === 'month' && (
           <MonthView reader={reader} month={month} onMonth={setMonth} thisMonth={monthOf(todayIn(plan?.timezone))} nonce={monthNonce}
-            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} onCoverage={setMonthCoverage} />
+            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} onCoverage={mergeMonthCoverage} />
         )}
         {view === 'month' && canEditTrips && CreateTripBar && (
           <Suspense fallback={null}>

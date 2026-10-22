@@ -170,9 +170,10 @@ export function CreateTripBar({ planIds, coverage, reader, onClear, onCreated, o
   // Every ticked week gets the groups that are free (on no list); groups on another list are skipped, not an error.
   const plans = planIds.map(planId => {
     const week = coverage?.get(planId);
-    return { planId, week, ...(week ? addPlan(week, names) : { groups: [], skipped: [] }) };
+    // Coverage not loaded for this week: send no groups and let the server add both.
+    return { planId, week, ...(week ? addPlan(week, names) : { groups: undefined, skipped: [] }) };
   });
-  const problems = plans.filter(entry => entry.week && !entry.groups.length);
+  const problems = plans.filter(entry => entry.week && !entry.groups?.length);
   const skippedNotes = plans.filter(entry => entry.skipped.length);
   const skipText = entry => entry.skipped.map(skip => `${groupLabel(skip.group)} is ${skip.tripName ? `on '${skip.tripName}'` : 'on another list'}`).join(', ');
   const finish = outcome => {
