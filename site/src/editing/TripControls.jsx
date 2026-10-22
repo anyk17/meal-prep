@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check } from 'lucide-react';
 import { createPlanEditor } from './planEditor.js';
 import { runTripAction } from './tripActions.js';
 import { addDays } from '../readers/shared.js';
@@ -79,8 +80,8 @@ export default function TripControls({ trip, reader, onTrip, onDeleted, selectio
       <Message info message={info} onDismiss={() => setInfo('')} />
       {selection && (
         <div className="space-y-1">
-          <button className={btnPrimary} disabled={busy || selection.length === 0} onClick={markBought}>Mark bought ({selection.length} {selection.length === 1 ? 'cell' : 'cells'})</button>
-          {selection.length === 0 && <p className="text-xs text-slate-500 dark:text-slate-400">Tick at least one week and group above.</p>}
+          <button className={btnPrimary} disabled={busy || selection.length === 0} onClick={markBought}><Check size={16} className="inline mr-1" />Mark as bought</button>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{selection.length === 0 ? 'Tick at least one week above.' : 'Use it after shopping: the ticked weeks move to Already bought.'}</p>
         </div>
       )}
       {undoCell && (

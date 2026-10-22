@@ -1,12 +1,14 @@
 import { Suspense, useEffect, useState } from 'react';
-import { ArrowLeft, Check, Plus, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Check, Leaf, Package, Plus, ShoppingCart } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatWeekRange } from '../dates.js';
-import { cellKey, cellOf, countChecked, formatQuantity, groupItemsByShelfLife, groupLabel, itemCheckKey, readTripChecks, readUnselected, selectedCells, selectionStorageKey, sortTrips, toBuyCells, toggleUnselected, totalsForCells, tripChanged, tripStorageKey, writeTripChecks, writeUnselected } from '../tripModel.js';
+import { cellKey, cellOf, countChecked, formatQuantity, groupItemsByShelfLife, groupLabel, itemCheckKey, readTripChecks, readUnselected, buyingSummary, selectedCells, toggleGroupUnselected, selectionStorageKey, sortTrips, toBuyCells, toggleUnselected, totalsForCells, tripChanged, tripStorageKey, writeTripChecks, writeUnselected } from '../tripModel.js';
 
 const card = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800';
 const shortDate = value => new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${value}T00:00:00Z`));
 const formatDateTime = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
+// "Oct 19–25" within a month, "Oct 26–Nov 1" across months: fits the narrow grid column on a phone.
+const compactRange = (start, end) => (start.slice(0, 7) === end.slice(0, 7) ? `${shortDate(start)}–${Number(end.slice(8))}` : `${shortDate(start)}–${shortDate(end)}`);
 const weeksLabel = trip => `${trip.weeks.length} ${trip.weeks.length === 1 ? 'week' : 'weeks'}`;
 const rangeLabel = trip => { const last = trip.weeks.at(-1); return `${shortDate(trip.weeks[0].week_start)} – ${shortDate(last.week_end)}`; };
 
@@ -44,40 +46,74 @@ function TripList({ trips, onOpen, staticMode, canEdit }) {
 
 const GROUPS = ['long_lasting', 'fresh'];
 
-// Weeks x Long-lasting/Fresh. In editing mode a bought cell is a button that asks to undo.
-function CoverageGrid({ trip, onOpenWeek, onUndo, undoKey }) {
+// One look per shelf-life group, shared by the grid and the item list.
+const GROUP_STYLE = {
+  long_lasting: { Icon: Package, hint: 'pantry & freezer', text: 'text-amber-700 dark:text-amber-300', on: 'bg-amber-500 border-amber-500 text-white', soft: 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-100 dark:border-amber-800' },
+  fresh: { Icon: Leaf, hint: 'perishable', text: 'text-green-700 dark:text-green-300', on: 'bg-green-600 border-green-600 text-white', soft: 'bg-green-50 text-green-900 border-green-300 dark:bg-green-950/40 dark:text-green-100 dark:border-green-800' },
+};
+function GroupName({ group, hint = false, className }) {
+  const { Icon, hint: text, text: tone } = GROUP_STYLE[group];
   return (
-    <table className="w-full text-sm border-separate border-spacing-y-1" aria-label="Weeks covered by this list" data-testid="coverage-grid">
+    <span className={cn('inline-flex flex-col', className)}>
+      <span className={cn('inline-flex items-center gap-1 font-semibold', tone)}><Icon size={14} aria-hidden="true" />{groupLabel(group)}</span>
+      {hint && <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">{text}</span>}
+    </span>
+  );
+}
+
+// Weeks x Long-lasting/Fresh. Normally shows To buy / Bought (a bought cell asks to undo in editing mode).
+// While shopping (`picking`), each to-buy cell is a tick box: Buying now, or Later. Column headers tick a whole group.
+function CoverageGrid({ trip, onOpenWeek, onUndo, undoKey, picking }) {
+  const off = new Set(picking?.unselected ?? []);
+  return (
+    <table className="w-full text-sm border-separate border-spacing-x-1 border-spacing-y-1 -mx-1" aria-label="Weeks covered by this list" data-testid="coverage-grid">
       <thead>
-        <tr className="text-xs text-slate-500 dark:text-slate-400 text-left">
-          <th scope="col" className="font-medium pr-2">Week</th>
-          {GROUPS.map(group => <th key={group} scope="col" className="font-medium px-1">{groupLabel(group)}</th>)}
+        <tr className="text-xs text-left align-bottom">
+          <th scope="col" className="font-medium text-slate-500 dark:text-slate-400 pb-1">Week</th>
+          {GROUPS.map(group => (
+            <th key={group} scope="col" className="font-medium pb-1 w-[34%]">
+              {picking && picking.pending.some(cell => cell.group === group)
+                ? <button type="button" onClick={() => picking.onGroup(group)} className="text-left min-h-11 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 px-1 -mx-1" aria-label={`Tick or untick every ${groupLabel(group)} week`}><GroupName group={group} hint /></button>
+                : <GroupName group={group} hint />}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
         {trip.weeks.map(week => (
           <tr key={week.plan_id} data-testid="grid-week">
-            <th scope="row" className="font-normal text-left pr-2 align-middle">
-              <button type="button" className="min-h-11 text-left hover:underline text-slate-800 dark:text-slate-100" onClick={() => onOpenWeek(week.week_start)}>{formatWeekRange(week.week_start)}</button>
+            <th scope="row" className="font-normal text-left align-middle whitespace-nowrap">
+              <button type="button" className="min-h-11 text-left hover:underline text-slate-800 dark:text-slate-100" onClick={() => onOpenWeek(week.week_start)} aria-label={formatWeekRange(week.week_start)}>{compactRange(week.week_start, week.week_end)}</button>
             </th>
             {GROUPS.map(group => {
               const cell = cellOf(week, group);
-              if (!cell) return <td key={group} className="px-1 text-slate-400 dark:text-slate-600 align-middle">—</td>;
+              if (!cell) return <td key={group} className="text-center text-slate-400 dark:text-slate-600 align-middle">—</td>;
+              const key = cellKey(week.plan_id, group);
               const bought = cell.state === 'bought';
-              const label = `${groupLabel(group)}, ${formatWeekRange(week.week_start)}: ${bought ? 'bought' : 'to buy'}${cell.changed_since_shopping ? ', changed since shopping' : ''}`;
-              const tone = bought ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200';
-              const body = (
-                <>
-                  <span className="font-medium">{bought ? '✓ Bought' : 'To buy'}</span>
-                  {cell.changed_since_shopping && <span className="block text-[11px] leading-tight text-amber-700 dark:text-amber-300" data-testid="cell-changed">changed since shopping</span>}
-                </>
-              );
+              const style = GROUP_STYLE[group];
+              const changed = cell.changed_since_shopping && <span className="block text-[11px] leading-tight text-amber-700 dark:text-amber-300" data-testid="cell-changed">changed since shopping</span>;
+              const where = `${groupLabel(group)}, ${formatWeekRange(week.week_start)}`;
+              if (picking && !bought) {
+                const on = !off.has(key);
+                return (
+                  <td key={group} className="align-middle" data-state={cell.state}>
+                    <button type="button" role="checkbox" aria-checked={on} aria-label={`${where}: ${on ? 'buying now' : 'later'}`} onClick={() => picking.onToggle(key)}
+                      className={cn('w-full min-h-11 px-2 rounded-lg border-2 flex items-center justify-center gap-1.5 font-medium', on ? style.soft : 'border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400')}>
+                      <span className={cn('w-5 h-5 rounded border-2 flex items-center justify-center shrink-0', on ? style.on : 'border-slate-300 dark:border-slate-600')}>{on && <Check size={14} strokeWidth={3} />}</span>
+                      {on ? 'Buying' : 'Later'}
+                    </button>
+                  </td>
+                );
+              }
+              const tone = bought ? 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' : cn('border', style.soft);
+              const body = <><span className="font-medium">{bought ? '✓ Bought' : 'To buy'}</span>{changed}</>;
+              const label = `${where}: ${bought ? 'bought' : 'to buy'}${cell.changed_since_shopping ? ', changed since shopping' : ''}`;
               return (
-                <td key={group} className="px-1 align-middle" data-state={cell.state}>
-                  {bought && onUndo
-                    ? <button type="button" aria-label={`${label}. Undo`} aria-pressed={undoKey === cellKey(week.plan_id, group)} onClick={() => onUndo({ ...cell, plan_id: week.plan_id, week_start: week.week_start, key: cellKey(week.plan_id, group) })}
-                        className={cn('w-full min-h-11 px-2 rounded-lg text-center border border-transparent hover:border-emerald-400', tone)}>{body}</button>
-                    : <span className={cn('flex flex-col justify-center w-full min-h-11 px-2 rounded-lg text-center', tone)}>{body}</span>}
+                <td key={group} className="align-middle" data-state={cell.state}>
+                  {bought && onUndo && !picking
+                    ? <button type="button" aria-label={`${label}. Undo`} aria-pressed={undoKey === key} onClick={() => onUndo({ ...cell, plan_id: week.plan_id, week_start: week.week_start, key })}
+                        className={cn('w-full min-h-11 px-2 rounded-lg text-center border border-transparent hover:border-slate-400', tone)}>{body}</button>
+                    : <span aria-label={label} className={cn('flex flex-col justify-center w-full min-h-11 px-2 rounded-lg text-center', tone)}>{body}</span>}
                 </td>
               );
             })}
@@ -91,7 +127,7 @@ function CoverageGrid({ trip, onOpenWeek, onUndo, undoKey }) {
 function ItemGroups({ groups, checks, onToggle }) {
   return groups.map(shelfGroup => (
     <div key={shelfGroup.group} role="group" aria-label={shelfGroup.label} data-group={shelfGroup.group} className="space-y-3">
-      <h3 className="flex items-baseline justify-between gap-2 px-1 pt-2 text-lg font-bold text-slate-900 dark:text-white"><span>{shelfGroup.label}</span>{onToggle && <span className="text-sm font-mono font-semibold text-slate-500 dark:text-slate-400">{shelfGroup.checked}/{shelfGroup.total}</span>}</h3>
+      <h3 className="flex items-baseline justify-between gap-2 px-1 pt-2 text-lg font-bold text-slate-900 dark:text-white"><GroupName group={shelfGroup.group} className="text-lg" />{onToggle && <span className="text-sm font-mono font-semibold text-slate-500 dark:text-slate-400">{shelfGroup.checked}/{shelfGroup.total}</span>}</h3>
       {shelfGroup.sections.map(group => (
         <section key={group.section} aria-label={`${shelfGroup.label}: ${group.section}`} className={cn(card, 'overflow-hidden')}>
           <h4 className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex justify-between"><span>{group.section}</span>{onToggle && <span className="font-mono normal-case">{group.checked}/{group.total}</span>}</h4>
@@ -122,34 +158,6 @@ function ItemGroups({ groups, checks, onToggle }) {
       ))}
     </div>
   ));
-}
-
-// The cell picker for "Shop now": every to-buy cell, ticked by default. Per device, like item checkmarks.
-function CellPicker({ cells, unselected, onToggle, onAll, onNone }) {
-  const off = new Set(unselected);
-  return (
-    <fieldset className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2" data-testid="cell-picker">
-      <legend className="px-1 text-sm font-semibold text-slate-800 dark:text-slate-100">What are you buying now?</legend>
-      <ul className="grid gap-1 sm:grid-cols-2">
-        {cells.map(cell => {
-          const on = !off.has(cell.key);
-          return (
-            <li key={cell.key}>
-              <button type="button" role="checkbox" aria-checked={on} onClick={() => onToggle(cell.key)}
-                className={cn('w-full min-h-11 px-3 rounded-lg border flex items-center gap-3 text-left text-sm', on ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-300 dark:border-slate-700')}>
-                <span className={cn('w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0', on ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 dark:border-slate-600')}>{on && <Check size={16} strokeWidth={3} />}</span>
-                <span>{formatWeekRange(cell.week_start)} · <span className="font-medium">{groupLabel(cell.group)}</span></span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="flex gap-2">
-        <button type="button" onClick={onAll} className="min-h-11 px-3 rounded-lg text-sm bg-slate-100 dark:bg-slate-800">Tick all</button>
-        <button type="button" onClick={onNone} className="min-h-11 px-3 rounded-lg text-sm bg-slate-100 dark:bg-slate-800">Untick all</button>
-      </div>
-    </fieldset>
-  );
 }
 
 function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, renderControls, editable }) {
@@ -189,14 +197,24 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, renderControls
         </div>
         {mode === 'static' && exportedAt && <p className="text-xs text-slate-500 dark:text-slate-400">Snapshot as of {formatDateTime(exportedAt)}</p>}
         {trip.status === 'done' && trip.completed_at && <p className="text-xs text-slate-500 dark:text-slate-400">Everything bought {formatDateTime(trip.completed_at)}</p>}
-        <CoverageGrid trip={trip} onOpenWeek={onOpenWeek} onUndo={editable ? setUndoCell : undefined} undoKey={undoCell?.key} />
+        {shopOpen && (
+          <ol className="text-sm text-slate-700 dark:text-slate-200 space-y-0.5 list-decimal pl-5" data-testid="shop-steps">
+            <li>Tick what you are buying on this trip; leave the rest for <span className="font-medium">Later</span>.</li>
+            <li>Shop with the list below. It totals only what is ticked.</li>
+            {editable ? <li>Back home, tap <span className="font-medium">Mark as bought</span>. Those weeks move to Already bought.</li> : <li>Back home, mark it as bought in the home app.</li>}
+          </ol>
+        )}
+        <CoverageGrid trip={trip} onOpenWeek={onOpenWeek} onUndo={editable ? setUndoCell : undefined} undoKey={undoCell?.key}
+          picking={shopOpen ? { pending, unselected, onToggle: key => saveUnselected(toggleUnselected(unselected, key)), onGroup: group => saveUnselected(toggleGroupUnselected(unselected, pending, group)) } : null} />
+        {shopOpen && (
+          <p className="text-sm text-slate-800 dark:text-slate-100" aria-live="polite" data-testid="buying-summary">
+            {chosen.length === 0 ? 'Nothing ticked yet.' : <>Buying now: {buyingSummary(chosen).map((entry, index) => <span key={entry.group}>{index > 0 && ' · '}<GroupName group={entry.group} className="inline" /> {entry.weeks} {entry.weeks === 1 ? 'week' : 'weeks'}</span>)} · {shownItems.length} items</>}
+          </p>
+        )}
         {pending.length > 0 && (
-          <div className="space-y-2">
-            <button type="button" aria-expanded={shopOpen} onClick={() => setShopOpen(open => !open)} className="inline-flex items-center gap-2 min-h-11 px-4 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500">
-              <ShoppingCart size={16} />{shopOpen ? 'Hide shop now' : 'Shop now'}
-            </button>
-            {shopOpen && <CellPicker cells={pending} unselected={unselected} onToggle={key => saveUnselected(toggleUnselected(unselected, key))} onAll={() => saveUnselected([])} onNone={() => saveUnselected(pending.map(cell => cell.key))} />}
-          </div>
+          <button type="button" aria-expanded={shopOpen} onClick={() => setShopOpen(open => !open)} className={cn('inline-flex items-center gap-2 min-h-11 px-4 rounded-lg text-sm font-medium', shopOpen ? 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100' : 'bg-indigo-600 text-white hover:bg-indigo-500')}>
+            <ShoppingCart size={16} />{shopOpen ? 'Done choosing' : 'Shop now'}
+          </button>
         )}
         {controls}
       </header>
@@ -209,8 +227,8 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, renderControls
             <p className="text-sm text-slate-600 dark:text-slate-300">To buy. Checkmarks stay on this device.</p>
             <span className="text-sm font-semibold px-3 py-1 rounded-full bg-slate-900 text-white dark:bg-slate-700" aria-live="polite">{checked} of {shownItems.length}</span>
           </div>
-          {partial && <p className="text-sm text-slate-600 dark:text-slate-300" data-testid="partial-note">Totals for {chosen.length} of {pending.length} to-buy {pending.length === 1 ? 'cell' : 'cells'}. Open Shop now to change that.</p>}
-          {chosen.length === 0 && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">No cells are ticked. Open Shop now and tick what you are buying.</p>}
+          {partial && <p className="text-sm text-slate-600 dark:text-slate-300" data-testid="partial-note">Showing only what you ticked in Shop now ({chosen.length} of {pending.length}). Open Shop now to change it.</p>}
+          {chosen.length === 0 && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">Nothing is ticked. Open Shop now and tick what you are buying.</p>}
           <ItemGroups groups={shelfGroups} checks={checks} onToggle={toggle} />
         </>
       )}

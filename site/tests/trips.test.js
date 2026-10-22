@@ -586,3 +586,17 @@ test('purchase body keeps only plan and group', () => {
 test('cell state labels', () => {
   assert.equal(coverageSummary(coverageItem('p', 'a', 'b', gc('bought', 't'), gc('to_buy', 't'))), 'Long-lasting: bought · Fresh: to buy');
 });
+
+test('Shop now: a group header ticks or unticks all of that group, and the summary counts weeks per group', async () => {
+  const { toggleGroupUnselected, buyingSummary } = await import('../src/tripModel.js');
+  const pending = [
+    { key: 'p1|long_lasting', group: 'long_lasting' }, { key: 'p1|fresh', group: 'fresh' },
+    { key: 'p2|long_lasting', group: 'long_lasting' }, { key: 'p2|fresh', group: 'fresh' },
+  ];
+  assert.deepEqual(toggleGroupUnselected([], pending, 'fresh').sort(), ['p1|fresh', 'p2|fresh']);
+  assert.deepEqual(toggleGroupUnselected(['p2|fresh'], pending, 'fresh'), []);
+  assert.deepEqual(toggleGroupUnselected(['p1|fresh', 'p2|fresh'], pending, 'fresh'), []);
+  assert.deepEqual(toggleGroupUnselected(['x'], pending, 'long_lasting').sort(), ['p1|long_lasting', 'p2|long_lasting', 'x']);
+  assert.deepEqual(buyingSummary(pending.slice(0, 3)), [{ group: 'long_lasting', weeks: 2 }, { group: 'fresh', weeks: 1 }]);
+  assert.deepEqual(buyingSummary([]), []);
+});

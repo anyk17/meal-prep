@@ -211,6 +211,16 @@ export function writeUnselected(storageKey, keys) {
 // Ticked = to-buy cells not in the unticked list. Returns the cells in trip order.
 export const selectedCells = (trip, unselected) => { const off = new Set(unselected); return toBuyCells(trip).filter(cell => !off.has(cell.key)); };
 export function toggleUnselected(unselected, key) { const set = new Set(unselected); if (set.has(key)) set.delete(key); else set.add(key); return [...set]; }
+// Tick or untick one group's to-buy cells at once: untick them all when every one is ticked, otherwise tick them all.
+export function toggleGroupUnselected(unselected, pending, group) {
+  const keys = pending.filter(cell => cell.group === group).map(cell => cell.key);
+  const set = new Set(unselected);
+  const allOn = keys.every(key => !set.has(key));
+  for (const key of keys) { if (allOn) set.add(key); else set.delete(key); }
+  return [...set];
+}
+// Weeks being bought per group, in group order: [{ group, weeks }] (groups with none are left out).
+export const buyingSummary = cells => SHELF_LIVES.map(group => ({ group, weeks: cells.filter(cell => cell.group === group).length })).filter(entry => entry.weeks > 0);
 
 // Short text for a cell/group set: "Nov 2 – Nov 8 · Fresh".
 export const cellLabel = (cell, formatWeek) => `${formatWeek(cell.week_start)} · ${groupLabel(cell.group)}`;
