@@ -8,7 +8,7 @@ import { createStaticReader } from '../src/readers/static.js';
 import { deriveCoverage, validateTrip } from '../src/readers/shared.js';
 import { createPlanEditor } from '../src/editing/planEditor.js';
 import { runTripAction } from '../src/editing/tripActions.js';
-import { GROUP_LABEL, countChecked, coverageSummary, createTripBody, addWeekBody, groupItems, groupItemsByShelfLife, groupsForChoice, removeWeekPath, swapImpactEntries, weekAvailability, weekGroupsLabel, weekSelectable, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../src/tripModel.js';
+import { GROUP_LABEL, countChecked, coverageSummary, createTripBody, addWeekBody, groupItems, groupItemsByShelfLife, removeWeekPath, swapImpactEntries, freeGroups, addPlan, addedMessage, chipState, chipRemoval, weekRemoval, addableWeeks, weekGroupsLabel, weekSelectable, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../src/tripModel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const examples = path.resolve(here, '../../docs/migration-to-cloud/examples');
@@ -425,21 +425,47 @@ test('coverage summary text and selectable weeks', () => {
   assert.equal(weekSelectable(coverageItem('p', 'a', 'b', gc('covered', 't1'), gc('on_list', 't2'))), false);
 });
 
-test('week availability checks only the chosen groups against other lists', () => {
+test('free groups, add plan and message', () => {
   const week = coverageItem('p', 'a', 'b', gc('covered', 't1'), gc());
-  assert.deepEqual(groupsForChoice('both'), ['long_lasting', 'fresh']);
-  assert.deepEqual(groupsForChoice('fresh'), ['fresh']);
-  assert.deepEqual(groupsForChoice('nonsense'), ['long_lasting', 'fresh']);
-  const everything = weekAvailability(week, groupsForChoice('both'));
-  assert.equal(everything.ok, false);
-  assert.deepEqual(everything.blocked, ['long_lasting']);
-  assert.match(everything.reason, /Long-lasting already on another shopping list/);
-  assert.equal(weekAvailability(week, groupsForChoice('fresh')).ok, true);
-  assert.equal(weekAvailability(week, groupsForChoice('long_lasting')).ok, false);
-  // On the target list itself a group is not blocked, but adds nothing.
-  assert.deepEqual(weekAvailability(week, groupsForChoice('both'), 't1'), { blocked: [], useful: ['fresh'], ok: true, reason: '' });
-  assert.equal(weekAvailability(week, groupsForChoice('long_lasting'), 't1').ok, false);
-  assert.equal(weekAvailability(week, groupsForChoice('long_lasting'), 't2').blocked[0], 'long_lasting');
+  assert.deepEqual(freeGroups(week), ['fresh']);
+  assert.deepEqual(freeGroups(coverageItem('p', 'a', 'b', gc(), gc())), ['long_lasting', 'fresh']);
+  assert.deepEqual(freeGroups(coverageItem('p', 'a', 'b', gc('on_list', 't1'), gc('covered', 't2'))), []);
+  const names = new Map([['t1', 'Mid-month fresh']]);
+  const plan = addPlan(week, names);
+  assert.deepEqual(plan.groups, ['fresh']);
+  assert.deepEqual(plan.skipped, [{ group: 'long_lasting', tripName: 'Mid-month fresh' }]);
+  assert.equal(addedMessage('Nov 2 – Nov 8', plan.groups, plan.skipped), "Added Nov 2 – Nov 8 (Fresh only — Long-lasting is on 'Mid-month fresh')");
+  assert.match(addedMessage('W', ['fresh'], addPlan(week, new Map()).skipped), /Long-lasting is on another list/);
+  assert.equal(addedMessage('W', ['long_lasting', 'fresh'], []), 'Added W');
+});
+
+test('chip state: on, off-free, off-blocked with the other list name', () => {
+  const tripWeek = { plan_id: 'p', groups: ['long_lasting'] };
+  const coverage = coverageItem('p', 'a', 'b', gc('on_list', 't1'), gc('on_list', 't2'));
+  const tripNames = new Map([['t2', 'Mid-month fresh']]);
+  assert.deepEqual(chipState({ tripWeek, coverage, group: 'long_lasting', tripId: 't1', tripNames }), { state: 'on', otherList: null });
+  assert.deepEqual(chipState({ tripWeek, coverage, group: 'fresh', tripId: 't1', tripNames }), { state: 'off-blocked', otherList: 'Mid-month fresh' });
+  assert.deepEqual(chipState({ tripWeek, coverage, group: 'fresh', tripId: 't1', tripNames: new Map() }), { state: 'off-blocked', otherList: null });
+  const free = coverageItem('p', 'a', 'b', gc('on_list', 't1'), gc());
+  assert.equal(chipState({ tripWeek, coverage: free, group: 'fresh', tripId: 't1', tripNames }).state, 'off-free');
+  assert.equal(chipState({ tripWeek, coverage: undefined, group: 'fresh', tripId: 't1', tripNames }).state, 'off-unknown');
+});
+
+test('removal decisions and the last-week guard', () => {
+  const both = { plan_id: 'p', groups: ['long_lasting', 'fresh'] }, one = { plan_id: 'q', groups: ['fresh'] };
+  assert.deepEqual(chipRemoval({ weeks: [both, one] }, both, 'fresh'), { kind: 'remove_group', group: 'fresh' });
+  assert.deepEqual(chipRemoval({ weeks: [both, one] }, one, 'fresh'), { kind: 'remove_week' });
+  assert.equal(chipRemoval({ weeks: [one] }, one, 'fresh').kind, 'blocked');
+  assert.match(chipRemoval({ weeks: [one] }, one, 'fresh').hint, /at least one week/);
+  assert.deepEqual(chipRemoval({ weeks: [both] }, both, 'fresh'), { kind: 'remove_group', group: 'fresh' });
+  assert.equal(weekRemoval({ weeks: [both] }).kind, 'blocked');
+  assert.deepEqual(weekRemoval({ weeks: [both, one] }), { kind: 'remove_week' });
+});
+
+test('addable weeks skip weeks already on the list and weeks with no free group', () => {
+  const trip = { weeks: [{ plan_id: 'a', groups: ['fresh'] }] };
+  const items = [coverageItem('a', 'x', 'y', gc(), gc('on_list', 't1')), coverageItem('b', 'x', 'y', gc(), gc()), coverageItem('c', 'x', 'y', gc('on_list', 't2'), gc('covered', 't2'))];
+  assert.deepEqual(addableWeeks(items, trip).map(item => item.plan_id), ['b']);
 });
 
 test('request builders', () => {

@@ -75,29 +75,56 @@ export function coverageSummary(weekCoverage) {
   return SHELF_LIVES.map(group => `${groupLabel(group)}: ${COVERAGE_LABEL[weekCoverage.groups[group].coverage].toLowerCase()}`).join(' · ');
 }
 
-// "What to buy" choices for adding weeks to a list.
-export const WHAT_TO_BUY = [
-  { value: 'both', label: 'Everything', groups: ['long_lasting', 'fresh'] },
-  { value: 'long_lasting', label: 'Long-lasting only', groups: ['long_lasting'] },
-  { value: 'fresh', label: 'Fresh only', groups: ['fresh'] },
-];
-export const groupsForChoice = choice => [...(WHAT_TO_BUY.find(entry => entry.value === choice) ?? WHAT_TO_BUY[0]).groups];
+// Groups of a week (WeekCoverage entry) that are on no list at all, in display order.
+export const freeGroups = weekCoverage => SHELF_LIVES.filter(group => weekCoverage?.groups?.[group]?.coverage === 'not_covered');
 
-// Can a week (WeekCoverage entry) take `groups` onto the list `targetTripId` (null = a new list)?
-// blocked: chosen groups already on another list; useful: chosen groups not yet on the target list.
-export function weekAvailability(weekCoverage, groups, targetTripId = null) {
-  const blocked = [], present = [];
-  for (const group of groups) {
-    const entry = weekCoverage?.groups?.[group];
-    if (!entry || entry.coverage === 'not_covered') continue;
-    if (targetTripId && entry.trip_id === targetTripId) present.push(group); else blocked.push(group);
-  }
-  const useful = groups.filter(group => !present.includes(group) && !blocked.includes(group));
-  return {
-    blocked, useful, ok: blocked.length === 0 && useful.length > 0,
-    reason: blocked.length ? `${blocked.map(groupLabel).join(' and ')} already on another shopping list` : '',
-  };
+// The other list a group sits on: its name from `tripNames` (Map trip_id -> name), or null when unknown.
+function otherListName(weekCoverage, group, tripNames) {
+  const id = weekCoverage?.groups?.[group]?.trip_id;
+  return (id && (tripNames instanceof Map ? tripNames.get(id) : tripNames?.[id])) || null;
 }
+
+// What adding a week would do: the free groups to add, and the groups skipped because another list has them.
+export function addPlan(weekCoverage, tripNames) {
+  const groups = freeGroups(weekCoverage);
+  const skipped = SHELF_LIVES.filter(group => !groups.includes(group) && weekCoverage?.groups?.[group]?.coverage)
+    .map(group => ({ group, tripName: otherListName(weekCoverage, group, tripNames) }));
+  return { groups, skipped };
+}
+const listText = skip => (skip.tripName ? `on '${skip.tripName}'` : 'on another list');
+
+// "Added Nov 2 – Nov 8 (Fresh only — Long-lasting is on 'X')"; plain "Added Nov 2 – Nov 8" when nothing was skipped.
+export function addedMessage(weekLabel, groups, skipped = []) {
+  if (!skipped.length) return `Added ${weekLabel}`;
+  return `Added ${weekLabel} (${weekGroupsLabel(groups)} — ${skipped.map(skip => `${groupLabel(skip.group)} is ${listText(skip)}`).join(', ')})`;
+}
+
+// Edit-chip state for one group of a week already on `tripId`:
+//   on: the group is on this list; off-free: nobody has it (can be added);
+//   off-blocked: another list has it (otherList = its name or null); off-unknown: no coverage info yet.
+export function chipState({ tripWeek, coverage, group, tripId, tripNames }) {
+  if (tripWeek?.groups?.includes(group)) return { state: 'on', otherList: null };
+  const entry = coverage?.groups?.[group];
+  if (!entry) return { state: 'off-unknown', otherList: null };
+  if (entry.coverage === 'not_covered') return { state: 'off-free', otherList: null };
+  if (entry.trip_id === tripId) return { state: 'on', otherList: null };
+  return { state: 'off-blocked', otherList: otherListName(coverage, group, tripNames) };
+}
+
+export const LAST_WEEK_HINT = 'A list needs at least one week. Delete it instead.';
+
+// What tapping an ON chip does: drop just that group, or the whole week when it is the week's only group.
+// Dropping the last group of the last week would empty the list, so that is blocked.
+export function chipRemoval(trip, tripWeek, group) {
+  const only = tripWeek.groups.length < 2 || !tripWeek.groups.includes(group);
+  if (only && trip.weeks.length < 2) return { kind: 'blocked', hint: LAST_WEEK_HINT };
+  return only ? { kind: 'remove_week' } : { kind: 'remove_group', group };
+}
+// The week's ✕ button: removing the only week is blocked.
+export const weekRemoval = trip => (trip.weeks.length < 2 ? { kind: 'blocked', hint: LAST_WEEK_HINT } : { kind: 'remove_week' });
+
+// Candidate weeks for a list's "Add a week": not already on it, with at least one free group.
+export const addableWeeks = (candidates, trip) => (candidates ?? []).filter(item => !trip.weeks.some(week => week.plan_id === item.plan_id) && freeGroups(item).length > 0);
 
 // Can anything at all still be added for this week? (Used to enable the month-view checkbox.)
 export const weekSelectable = weekCoverage => SHELF_LIVES.some(group => weekCoverage?.groups?.[group]?.coverage === 'not_covered');
