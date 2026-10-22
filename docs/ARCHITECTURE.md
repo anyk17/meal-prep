@@ -25,7 +25,7 @@ flowchart LR
 
 - **Home app**: one container on the NAS. It plans, edits and publishes. Viewing is open on the home network; changes need a login.
 - **Public site**: static files built from what the home app publishes. Read-only; nothing on GitHub can call the NAS.
-- **Release**: GitHub builds and signs the image; a workstation decides when the NAS runs it (see phase 6d in the [plan](migration-to-cloud/README.md)).
+- **Release**: GitHub builds and signs the image; a workstation decides when the NAS runs it (see the [go-live plan](migration-to-cloud/README.md)). How to run things: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Core ideas
 
