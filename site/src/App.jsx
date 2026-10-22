@@ -43,7 +43,6 @@ function formatLocalDateTime(value) {
     timeStyle: 'short'
   }).format(date);
 }
-function getGarbageCollectorLabel(date = new Date()) { return date.getDate() % 2 === 0 ? 'J' : 'T'; }
 function readTheme() {
   try { const saved = window.localStorage.getItem('theme'); if (saved === 'light' || saved === 'dark') return saved; } catch { /* browser storage may be disabled */ }
   try { if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'; } catch { /* optional browser feature */ }
@@ -81,7 +80,6 @@ function App() {
   const [logoutError, setLogoutError] = useState(null);
   const requestGeneration = useRef(0);
   const hasPlan = useRef(false);
-  const garbageCollector = getGarbageCollectorLabel();
 
   // Theme state
   const [theme, setTheme] = useState(readTheme);
@@ -258,8 +256,6 @@ function App() {
           <div className="flex items-center gap-2 sm:gap-4">
             <div className="text-xs text-slate-400 font-mono hidden sm:block">
               {publicationDate}{plan && <><br />Seed: {plan.seed}<br /><span className="text-[10px] opacity-75">r{plan.revision} · {formatLocalDateTime(plan.generated_at)}</span></>}
-              <br />
-              <span className="text-[10px] opacity-75">Garbage Collector: {garbageCollector}</span>
             </div>
             <button onClick={() => (view !== 'week' ? reloadMonth(true) : reload(true))} disabled={refreshing} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
             {LoginDialog && (auth.username ? (
