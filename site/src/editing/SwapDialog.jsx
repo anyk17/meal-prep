@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, Check, ArrowRight, TriangleAlert } from 'lucide-react';
 import { createPlanEditor } from './planEditor.js';
-import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, isLinked, SCOPE_LABELS, groupGroceryDelta, tripImpactMessage, SWAP_WARNING_TITLE, swapErrorMessage, swapNeedsReload } from './swapModel.js';
+import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, isLinked, SCOPE_LABELS, groupGroceryDelta, tripImpactMessages, SWAP_WARNING_TITLE, swapErrorMessage, swapNeedsReload } from './swapModel.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE_PATH || '/api/v1';
 const btn = 'min-h-11 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
@@ -78,7 +78,7 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
   }, [variants, query, protein]);
   const pickRecipe = item => { setRecipe(item); void loadPreview(defaultVariant(item, current?.carb), scope); };
   const groups = preview ? groupGroceryDelta(preview.grocery_delta) : [];
-  const impact = preview ? tripImpactMessage(preview.trip) : null;
+  const impacts = preview ? tripImpactMessages(preview.trips ?? preview.trip) : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 bg-black/50 backdrop-blur-sm">
@@ -202,9 +202,9 @@ export default function SwapDialog({ slot, plan, onClose, onApplied, onReload })
                       <p className="text-xs opacity-80">You can still swap. These rules only guide generated plans.</p>
                     </div>
                   )}
-                  {impact && (
-                    <p className={`rounded-lg px-3 py-2 ${impact.kind === 'done' ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100 border border-amber-300 dark:border-amber-800' : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>{impact.text}</p>
-                  )}
+                  {impacts.map((impact, index) => (
+                    <p key={index} className={`rounded-lg px-3 py-2 ${impact.kind === 'done' ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100 border border-amber-300 dark:border-amber-800' : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>{impact.text}</p>
+                  ))}
                 </>
               )}
             </section>

@@ -11,6 +11,7 @@ chicken:
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
   notes: "Pechuga o muslo"
 
 beef:
@@ -18,6 +19,7 @@ beef:
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
   notes: "Lomo fino u otros cortes"
 
 liver:
@@ -25,6 +27,7 @@ liver:
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
   notes: "Higado de res"
 
 pork:
@@ -32,6 +35,7 @@ pork:
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
   notes: "Bondiola u otros cortes"
 
 fish_salmon:
@@ -39,36 +43,42 @@ fish_salmon:
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
 
 fish_tuna_fillet:
   display: "Atún en filete"
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
 
 fish_tuna_canned:
   display: "Atún en lata"
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
 
 fish_tilapia:
   display: "Tilapia"
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
 
 egg:
   display: "Huevo"
   unit: units
   section: protein
   kind: protein
+  shelf_life: long_lasting
 
 sausage:
   display: "Salchicha"
   unit: g
   section: protein
   kind: protein
+  shelf_life: long_lasting
   notes: "Opcional en algunas recetas"
 
 # ============================================================================
@@ -80,6 +90,7 @@ rice:
   unit: g
   section: carb
   kind: carb
+  shelf_life: long_lasting
   default_qty_g: 40
   max_times_week: 7
 
@@ -88,6 +99,7 @@ potato:
   unit: g
   section: carb
   kind: carb
+  shelf_life: fresh
   default_qty_g: 120
   max_times_week: 5
 
@@ -96,6 +108,7 @@ platano_verde:
   unit: g
   section: carb
   kind: carb
+  shelf_life: fresh
   default_qty_g: 100
   max_times_week: 2
 
@@ -104,6 +117,7 @@ platano_maduro:
   unit: g
   section: carb
   kind: carb
+  shelf_life: fresh
   default_qty_g: 80
   max_times_week: 2
 
@@ -112,6 +126,7 @@ yuca:
   unit: g
   section: carb
   kind: carb
+  shelf_life: fresh
   default_qty_g: 70
   max_times_week: 1
 
@@ -120,6 +135,7 @@ arepa:
   unit: units
   section: carb
   kind: carb
+  shelf_life: long_lasting
   default_qty_g: 0.5
   max_times_week: 7
 
@@ -128,6 +144,7 @@ corn:
   unit: g
   section: carb
   kind: carb
+  shelf_life: long_lasting
   default_qty_g: 100
   max_times_week: 2
 
@@ -136,6 +153,7 @@ pasta:
   unit: g
   section: carb
   kind: carb
+  shelf_life: long_lasting
   default_qty_g: 40
   max_times_week: 1
   notes: "Tornillos u otra forma"
@@ -145,6 +163,7 @@ lentils:
   unit: g
   section: carb
   kind: carb
+  shelf_life: long_lasting
   default_qty_g: 55
   max_times_week: 1
 
@@ -157,150 +176,175 @@ tomato:
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 cherry_tomato:
   display: "Tomate cherry"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 onion:
   display: "Cebolla cabezona"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 red_onion:
   display: "Cebolla morada"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 green_onion:
   display: "Cebolla larga"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 garlic:
   display: "Ajo"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 carrot:
   display: "Zanahoria"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 zucchini:
   display: "Zucchini"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 yellow_zucchini:
   display: "Zucchini amarillo"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 bell_pepper:
   display: "Pimentón"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 red_bell_pepper:
   display: "Pimentón rojo"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 green_bell_pepper:
   display: "Pimentón verde"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 broccoli:
   display: "Brócoli"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 celery:
   display: "Apio"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 green_beans:
   display: "Habichuela"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 peas:
   display: "Arverja"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 asparagus:
   display: "Espárragos"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 spinach:
   display: "Espinaca"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 lettuce:
   display: "Lechuga"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 mushroom:
   display: "Champiñones"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 eggplant:
   display: "Berenjena"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 cilantro:
   display: "Cilantro"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 parsley:
   display: "Perejil"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 basil:
   display: "Albahaca"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 ginger:
   display: "Jengibre"
   unit: g
   section: vegetable
   kind: other
+  shelf_life: fresh
 
 # ============================================================================
 # FATS & OILS
@@ -311,30 +355,35 @@ olive_oil:
   unit: ml
   section: fat
   kind: other
+  shelf_life: long_lasting
 
 sesame_oil:
   display: "Aceite de ajonjolí"
   unit: ml
   section: fat
   kind: other
+  shelf_life: long_lasting
 
 achiote_oil:
   display: "Aceite con achiote"
   unit: ml
   section: fat
   kind: other
+  shelf_life: long_lasting
 
 butter:
   display: "Mantequilla"
   unit: g
   section: fat
   kind: other
+  shelf_life: long_lasting
 
 sesame_seeds:
   display: "Ajonjolí"
   unit: g
   section: fat
   kind: other
+  shelf_life: long_lasting
 
 # ============================================================================
 # DAIRY & CONDIMENTS
@@ -345,30 +394,35 @@ greek_yogurt:
   unit: g
   section: dairy
   kind: other
+  shelf_life: fresh
 
 heavy_cream:
   display: "Crema de leche"
   unit: ml
   section: dairy
   kind: other
+  shelf_life: fresh
 
 coconut_cream:
   display: "Crema de coco"
   unit: ml
   section: dairy
   kind: other
+  shelf_life: long_lasting
 
 parmesan:
   display: "Queso parmesano"
   unit: g
   section: dairy
   kind: other
+  shelf_life: long_lasting
 
 fresh_cheese:
   display: "Queso fresco"
   unit: g
   section: dairy
   kind: other
+  shelf_life: fresh
 
 # ============================================================================
 # SAUCES & SEASONINGS
@@ -379,36 +433,42 @@ soy_sauce:
   unit: ml
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 tomato_sauce:
   display: "Salsa de tomate"
   unit: ml
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 tomato_paste:
   display: "Pasta de tomate"
   unit: g
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 honey:
   display: "Miel"
   unit: ml
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 olives:
   display: "Aceitunas"
   unit: g
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 achiote:
   display: "Achiote"
   unit: g
   section: condiment
   kind: other
+  shelf_life: long_lasting
 
 # ============================================================================
 # HERBS & SPICES
@@ -419,65 +479,76 @@ bay_leaf:
   unit: units
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 thyme:
   display: "Tomillo"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 cumin:
   display: "Comino"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 paprika:
   display: "Paprika"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 rosemary:
   display: "Romero"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 lemon:
   display: "Limón"
   unit: units
   section: other
   kind: other
+  shelf_life: fresh
 
 green_apple:
   display: "Manzana verde"
   unit: g
   section: produce
   kind: other
+  shelf_life: fresh
 
 salt:
   display: "Sal"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 pepper:
   display: "Pimienta"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 black_pepper:
   display: "Pimienta negra"
   unit: g
   section: spice
   kind: other
+  shelf_life: long_lasting
 
 bread:
   display: "Pan"
   unit: units
   section: carb
   kind: carb
+  shelf_life: fresh
   default_qty_g: 2
   max_times_week: 2

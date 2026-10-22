@@ -51,10 +51,11 @@ class Env:
             self.plans = SqlitePlanRepository(self.db)
             self.trip_repo = SqliteShoppingTripRepository(self.db)
         self.kind = kind
+        self.labels = INPUTS.shelf_lives()  # mutable: tests relabel to prove labels are read live
         self.now = NOW
         clock = lambda: self.now  # noqa: E731
         self.workflow = PlanWorkflowService(self.plans, Reader(), clock, generator=CachedGenerator())
-        self.svc = ShoppingTripService(self.trip_repo, self.plans, clock)
+        self.svc = ShoppingTripService(self.trip_repo, self.plans, clock, lambda: self.labels)
 
     def plan(self, week: date, seed: int = 1) -> str:
         return self.workflow.create_plan(week, seed=seed).plan_id
@@ -144,10 +145,11 @@ def test_sum_items_keeps_units_separate_and_sections() -> None:
     def line(ing, qty, unit, section="produce"):
         return {"ingredient_id": ing, "display": ing.title(), "quantity": qty, "unit": unit,
                 "section": section, "notes": None}
+    labels = {"tomato": "fresh", "milk": "fresh"}
 
     w1 = {"sections": {"produce": [line("tomato", 100.0, "g"), line("tomato", 2.0, "units")]}}
     w2 = {"sections": {"produce": [line("tomato", 50.5, "g")], "dairy": [line("milk", 200.0, "ml", "dairy")]}}
-    items = trips.sum_items([("a", w1), ("b", w2)])
+    items = trips.sum_items([("a", w1, trips.GROUPS), ("b", w2, trips.GROUPS)], labels)
     assert {(i["ingredient_id"], i["unit"]): (i["quantity"], i["plan_ids"]) for i in items} == {
         ("tomato", "g"): (150.5, ["a", "b"]),
         ("tomato", "units"): (2.0, ["a"]),
@@ -252,17 +254,26 @@ def test_sqlite_constraints(tmp_path) -> None:
             "INSERT INTO shopping_trips VALUES ('trip_b', 'x', 'open', 1, 'a', 'a', NULL, 0)"
         )
         with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
-            conn.execute("INSERT INTO shopping_trip_weeks (trip_id, plan_id) VALUES ('trip_b', ?)", (p1,))
+            conn.execute(
+                "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group) VALUES ('trip_b', ?, 'fresh')",
+                (p1,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute(
+                "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group) VALUES ('trip_b', ?, 'frozen')",
+                (p2,),
+            )
         with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
             conn.execute(
-                "INSERT INTO shopping_trip_weeks (trip_id, plan_id) VALUES ('trip_b', 'plan_missing')"
+                "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group)"
+                " VALUES ('trip_b', 'plan_missing', 'fresh')"
             )
         with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
             conn.execute(
                 "INSERT INTO shopping_trips VALUES ('trip_c', 'x', 'open', 1, 'a', 'a', NULL, 0)"
             )
             conn.execute(
-                "INSERT INTO shopping_trip_weeks VALUES ('trip_c', ?, 99, 'sha256:x')", (p2,)
+                "INSERT INTO shopping_trip_weeks VALUES ('trip_c', ?, 'fresh', 99, 'sha256:x')", (p2,)
             )
     finally:
         conn.close()
@@ -303,8 +314,10 @@ def test_done_freezes_revisions(env: Env) -> None:
         {"plan_id": p2, "week_start": "2026-11-02", "week_end": "2026-11-08", "revision": 1},
     ]
     cov = {i["plan_id"]: i for i in env.svc.coverage(summaries)["items"]}
-    assert (cov[p1]["coverage"], cov[p1]["changed_since_shopping"], cov[p1]["trip_id"]) == ("covered", True, tid)
-    assert cov[p2]["changed_since_shopping"] is False
+    for group in trips.GROUPS:
+        g = cov[p1]["groups"][group]
+        assert (g["coverage"], g["changed_since_shopping"], g["trip_id"]) == ("covered", True, tid)
+        assert cov[p2]["groups"][group]["changed_since_shopping"] is False
 
 
 def test_done_rejects_week_changes_and_repeats(env: Env) -> None:
@@ -382,9 +395,12 @@ def test_coverage_states(env: Env) -> None:
                 "week_end": (week + timedelta(days=6)).isoformat(), "revision": rev}
 
     items = env.svc.coverage([summary(p1, W1), summary(p2, W2), summary(p3, W3)])["items"]
-    assert [(i["coverage"], i["trip_id"], i["changed_since_shopping"]) for i in items] == [
-        ("on_list", open_trip, False), ("covered", done_trip, False), ("not_covered", None, False)
-    ]
+    for group in trips.GROUPS:
+        assert [
+            (i["groups"][group]["coverage"], i["groups"][group]["trip_id"], i["groups"][group]["changed_since_shopping"])
+            for i in items
+        ] == [("on_list", open_trip, False), ("covered", done_trip, False), ("not_covered", None, False)]
+    assert [set(i["groups"]) for i in items] == [set(trips.GROUPS)] * 3
     assert env.svc.coverage([]) == {"items": []}
 
 
@@ -393,7 +409,237 @@ def test_persistence_across_instances(tmp_path) -> None:
     p1, p2 = env.plan(W1), env.plan(W2)
     tid = env.svc.create([p1, p2], name="Weekend")["trip_id"]
     env.svc.mark_done(tid, 1)
-    reopened = ShoppingTripService(SqliteShoppingTripRepository(env.db), SqlitePlanRepository(env.db), lambda: NOW)
+    reopened = ShoppingTripService(SqliteShoppingTripRepository(env.db), SqlitePlanRepository(env.db), lambda: NOW, INPUTS.shelf_lives)
     view = reopened.get(tid)
     assert view["status"] == "done" and view["name"] == "Weekend" and view["version"] == 2
     assert [w["revision"] for w in view["weeks"]] == [1, 1]
+
+
+# ---------------------------------------------------------------- shelf-life groups (phase 5b)
+
+LL, FR = trips.LONG_LASTING, trips.FRESH
+
+
+def group_cov(env: Env, plan_id: str, group: str, rev: int = 1) -> tuple[str, str | None, bool]:
+    s = {"plan_id": plan_id, "week_start": "2026-10-26", "week_end": "2026-11-01", "revision": rev}
+    g = env.svc.coverage([s])["items"][0]["groups"][group]
+    return g["coverage"], g["trip_id"], g["changed_since_shopping"]
+
+
+def test_default_is_both_groups_and_items_carry_shelf_life(env: Env) -> None:
+    p1 = env.plan(W1)
+    view = env.svc.create([p1])
+    assert [w["groups"] for w in view["weeks"]] == [[LL, FR]]
+    assert view["items"] and all(i["shelf_life"] == INPUTS.shelf_lives()[i["ingredient_id"]] for i in view["items"])
+    assert {i["shelf_life"] for i in view["items"]} == {LL, FR}
+
+
+def test_group_coverage_long_lasting_week_two_fresh_not_covered(env: Env) -> None:
+    p1, p2 = env.plan(W1), env.plan(W2)
+    # Typical month: list A has long-lasting for weeks 1-2 but fresh only for week 1.
+    a = env.svc.create([p1], groups=[LL, FR])
+    a = env.svc.add_week(a["trip_id"], p2, a["version"], groups=[LL])
+    assert [w["groups"] for w in a["weeks"]] == [[LL, FR], [LL]]
+    assert {i["shelf_life"] for i in a["items"] if p2 in i["plan_ids"]} == {LL}
+    items = env.svc.coverage(
+        [
+            {"plan_id": p1, "week_start": "2026-10-26", "week_end": "2026-11-01", "revision": 1},
+            {"plan_id": p2, "week_start": "2026-11-02", "week_end": "2026-11-08", "revision": 1},
+        ]
+    )["items"]
+    assert items[0]["groups"][LL]["coverage"] == items[0]["groups"][FR]["coverage"] == "on_list"
+    assert items[1]["groups"][LL] == {"coverage": "on_list", "trip_id": a["trip_id"], "changed_since_shopping": False}
+    assert items[1]["groups"][FR] == {"coverage": "not_covered", "trip_id": None, "changed_since_shopping": False}
+    # Fresh for week two goes on its own later list; the pair rule is per group.
+    b = env.svc.create([p2], groups=[FR])
+    assert group_cov(env, p2, FR)[:2] == ("on_list", b["trip_id"])
+    assert group_cov(env, p2, LL)[:2] == ("on_list", a["trip_id"])
+    env.svc.mark_done(b["trip_id"], 1)
+    assert group_cov(env, p2, FR, rev=1) == ("covered", b["trip_id"], False)
+    assert group_cov(env, p2, LL)[0] == "on_list"
+    env.new_revision(p2)
+    assert group_cov(env, p2, FR, rev=2) == ("covered", b["trip_id"], True)
+    assert group_cov(env, p2, LL, rev=2) == ("on_list", a["trip_id"], False)
+
+
+def test_create_and_add_with_groups_conflicts_per_group(env: Env) -> None:
+    p1, p2 = env.plan(W1), env.plan(W2)
+    a = env.svc.create([p1], groups=[LL])
+    assert [w["groups"] for w in a["weeks"]] == [[LL]]
+    assert {i["shelf_life"] for i in a["items"]} == {LL}
+    b = env.svc.create([p1], groups=[FR])  # the other group is free
+    with pytest.raises(trips.WeekAlreadyOnTrip) as excinfo:
+        env.svc.create([p1], groups=[LL, FR])
+    assert excinfo.value.plan_id == p1 and excinfo.value.group in (LL, FR)
+    with pytest.raises(trips.WeekAlreadyOnTrip):
+        env.svc.add_week(b["trip_id"], p1, 1, groups=[LL])  # LL is on trip a
+    with pytest.raises(trips.WeekAlreadyOnTrip):
+        env.svc.add_week(b["trip_id"], p1, 1, groups=[FR])  # nothing new to add to b
+    # A failed create leaves nothing behind.
+    assert len(env.svc.list()["items"]) == 2
+    env.svc.create([p2])
+    with pytest.raises(trips.InvalidTrip):
+        env.svc.create([p2], groups=[])
+    with pytest.raises(trips.InvalidTrip):
+        env.svc.create([p2], groups=["frozen"])
+
+
+def test_add_week_extends_groups_of_a_week_already_on_the_list(env: Env) -> None:
+    p1 = env.plan(W1)
+    a = env.svc.create([p1], groups=[FR])
+    extended = env.svc.add_week(a["trip_id"], p1, a["version"], groups=[LL])
+    assert extended["version"] == 2 and [w["groups"] for w in extended["weeks"]] == [[LL, FR]]
+    assert len(extended["weeks"]) == 1
+
+
+def test_remove_one_group_or_whole_week(env: Env) -> None:
+    p1, p2 = env.plan(W1), env.plan(W2)
+    a = env.svc.create([p1, p2])
+    tid = a["trip_id"]
+    only_ll = env.svc.remove_week(tid, p1, 1, group=FR)
+    assert only_ll["version"] == 2 and [w["groups"] for w in only_ll["weeks"]] == [[LL], [LL, FR]]
+    assert group_cov(env, p1, FR)[0] == "not_covered" and group_cov(env, p1, LL)[0] == "on_list"
+    with pytest.raises(trips.WeekNotOnTrip):
+        env.svc.remove_week(tid, p1, 2, group=FR)  # already gone
+    gone = env.svc.remove_week(tid, p1, 2, group=LL)  # no group left: the week entry disappears
+    assert [w["plan_id"] for w in gone["weeks"]] == [p2]
+    with pytest.raises(trips.LastWeek):
+        env.svc.remove_week(tid, p2, 3)
+    last = env.svc.remove_week(tid, p2, 3, group=FR)
+    with pytest.raises(trips.LastWeek):
+        env.svc.remove_week(tid, p2, last["version"], group=LL)  # would leave an empty list
+    with pytest.raises(trips.WeekNotOnTrip):
+        env.svc.remove_week(tid, p2, last["version"], group="frozen")
+
+
+def test_labels_are_read_from_current_inputs_not_snapshots(env: Env) -> None:
+    p1 = env.plan(W1)
+    ll_only = env.svc.create([p1], groups=[LL])
+    before = {i["ingredient_id"] for i in ll_only["items"]}
+    assert "chicken" in before and "rice" in before
+    env.labels["chicken"] = FR  # relabel an ingredient: no new plan revision needed
+    after = env.svc.get(ll_only["trip_id"])
+    assert env.plans.get_plan(p1).current_revision == 1
+    ids = {i["ingredient_id"] for i in after["items"]}
+    assert "chicken" not in ids and "rice" in ids
+    assert all(i["shelf_life"] == LL for i in after["items"])
+    # and the done list regroups too
+    env.svc.mark_done(ll_only["trip_id"], ll_only["version"])
+    env.labels["chicken"] = LL
+    assert "chicken" in {i["ingredient_id"] for i in env.svc.get(ll_only["trip_id"])["items"]}
+
+
+def test_group_items_sum_to_the_full_list(env: Env) -> None:
+    p1 = env.plan(W1)
+    full = item_map(env.svc.create([p1]))
+    assert full == {k: v for k, v in weekly_map(env, p1).items()}
+    env.svc.delete(env.svc.list()["items"][0]["trip_id"], 1)
+    ll = item_map(env.svc.create([p1], groups=[LL]))
+    fresh_id = env.svc.create([p1], groups=[FR])
+    assert {**ll, **item_map(fresh_id)} == full and not ll.keys() & item_map(fresh_id).keys()
+
+
+def test_sqlite_unique_plan_group(tmp_path) -> None:
+    env = Env("sqlite", tmp_path)
+    p1 = env.plan(W1)
+    env.trip_repo.create(trips.new_trip("trip_a", None, [trips.TripWeek(p1, W1, groups=(LL,))], NOW))
+    env.trip_repo.create(trips.new_trip("trip_b", None, [trips.TripWeek(p1, W1, groups=(FR,))], NOW))  # other group
+    with pytest.raises(trips.WeekAlreadyOnTrip) as excinfo:
+        env.trip_repo.create(trips.new_trip("trip_c", None, [trips.TripWeek(p1, W1, groups=(FR, LL))], NOW))
+    assert excinfo.value.group in (LL, FR)
+    conn = connect(env.db)
+    try:
+        conn.execute("INSERT INTO shopping_trips VALUES ('trip_x', 'x', 'open', 1, 'a', 'a', NULL, 0)")
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            conn.execute(
+                "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group) VALUES ('trip_x', ?, 'long_lasting')",
+                (p1,),
+            )
+    finally:
+        conn.close()
+
+
+def test_memory_and_sqlite_save_group_changes(env: Env) -> None:
+    p1 = env.plan(W1)
+    a = env.svc.create([p1], groups=[LL])
+    env.svc.add_week(a["trip_id"], p1, 1, groups=[FR])
+    b = env.svc.create([env.plan(W2)])
+    with pytest.raises(trips.WeekAlreadyOnTrip):  # the stored pair is held by trip a
+        env.svc.add_week(b["trip_id"], p1, 1, groups=[LL])
+    assert env.svc.get(a["trip_id"])["weeks"][0]["groups"] == [LL, FR]
+
+
+def test_migration_6_backfills_labels_and_expands_memberships(tmp_path) -> None:
+    import json
+
+    from mealplanner.adapters.sqlite import migrations
+
+    path = tmp_path / "v5.db"
+    conn = migrations.connect(path)
+    for version, name, steps in migrations.MIGRATIONS[:5]:
+        with migrations.transaction(conn):
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+            )
+            for step in steps:
+                conn.execute(step)
+            conn.execute("INSERT INTO schema_version VALUES (?, ?, 'x')", (version, name))
+    with migrations.transaction(conn):
+        for position, (ing, label_free) in enumerate({"chicken": {}, "carrot": {}, "rice": {}}.items()):
+            conn.execute(
+                "INSERT INTO ingredients VALUES (?, ?, ?)",
+                (ing, position, json.dumps({"id": ing, "name": ing, **label_free})),
+            )
+        for plan_id, week in (("plan_a", "2026-10-26"), ("plan_b", "2026-11-02")):
+            conn.execute("INSERT INTO plans VALUES (?, 'default', ?, 'America/Bogota', 1)", (plan_id, week))
+            conn.execute(
+                "INSERT INTO plan_revisions VALUES (?, 1, 'sha256:s', '{}', '{}', '[]', 'basis', 'generated', 'x')",
+                (plan_id,),
+            )
+        conn.execute("INSERT INTO shopping_trips VALUES ('t_open', 'o', 'open', 1, 'a', 'a', NULL, 0)")
+        conn.execute("INSERT INTO shopping_trips VALUES ('t_done', 'd', 'done', 2, 'a', 'a', 'b', 0)")
+        conn.execute("INSERT INTO shopping_trip_weeks VALUES ('t_open', 'plan_a', NULL, NULL)")
+        conn.execute("INSERT INTO shopping_trip_weeks VALUES ('t_done', 'plan_b', 1, 'sha256:s')")
+    assert migrations.migrate(conn) == [6]
+    rows = conn.execute(
+        "SELECT trip_id, plan_id, shelf_group, covered_revision, covered_snapshot_id"
+        " FROM shopping_trip_weeks ORDER BY trip_id, shelf_group"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("t_done", "plan_b", "fresh", 1, "sha256:s"),
+        ("t_done", "plan_b", "long_lasting", 1, "sha256:s"),
+        ("t_open", "plan_a", "fresh", None, None),
+        ("t_open", "plan_a", "long_lasting", None, None),
+    ]
+    labels = {
+        r["ingredient_id"]: json.loads(r["content"])["shelf_life"]
+        for r in conn.execute("SELECT ingredient_id, content FROM ingredients")
+    }
+    assert labels == {"chicken": "long_lasting", "carrot": "fresh", "rice": "long_lasting"}
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+        conn.execute("INSERT INTO shopping_trips VALUES ('t_new', 'n', 'open', 1, 'a', 'a', NULL, 0)")
+        conn.execute("INSERT INTO shopping_trip_weeks VALUES ('t_new', 'plan_a', 'fresh', NULL, NULL)")
+    conn.close()
+
+
+def test_migration_6_fails_on_an_ingredient_without_a_shipped_label(tmp_path) -> None:
+    import json
+
+    from mealplanner.adapters.sqlite import migrations
+
+    path = tmp_path / "v5.db"
+    conn = migrations.connect(path)
+    for version, name, steps in migrations.MIGRATIONS[:5]:
+        with migrations.transaction(conn):
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+            )
+            for step in steps:
+                conn.execute(step)
+            conn.execute("INSERT INTO schema_version VALUES (?, ?, 'x')", (version, name))
+    with migrations.transaction(conn):
+        conn.execute("INSERT INTO ingredients VALUES ('mystery', 0, ?)", (json.dumps({"id": "mystery"}),))
+    with pytest.raises(migrations.DatabaseError, match="mystery"):
+        migrations.migrate(conn)
+    assert migrations.current_version(conn) == 5
+    conn.close()

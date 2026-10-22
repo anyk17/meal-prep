@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 BUSY_TIMEOUT_MS = 5000
+
+# Migration 6 backfills ingredient shelf_life labels from the shipped YAML (in the container
+# /app/data); the project root is four levels above this file (…/planner/mealplanner/adapters/sqlite).
+INGREDIENT_LABELS_PATH = Path(__file__).resolve().parents[4] / "data" / "ingredients.yml"
+SHELF_LIVES = ("long_lasting", "fresh")
 
 
 class DatabaseError(Exception):
@@ -17,9 +23,51 @@ class DatabaseError(Exception):
 
 # ---------------------------------------------------------------- migrations
 
-# Each migration is (version, name, statements). Statements are separate strings
-# because triggers contain semicolons and sqlite3.executescript would commit.
-MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
+Step = str | Callable[[sqlite3.Connection], None]
+
+
+def _backfill_shelf_life(conn: sqlite3.Connection) -> None:
+    """Add shelf_life to stored ingredients from data/ingredients.yml, failing if any stays unlabeled."""
+    import yaml
+
+    rows = conn.execute("SELECT ingredient_id, content FROM ingredients").fetchall()
+    if not rows:
+        return
+    try:
+        with open(INGREDIENT_LABELS_PATH, encoding="utf-8") as f:
+            shipped = yaml.safe_load(f) or {}
+    except OSError as exc:
+        raise DatabaseError(
+            f"migration 6 needs {INGREDIENT_LABELS_PATH} to label stored ingredients: {exc}"
+        ) from exc
+    unlabeled: list[str] = []
+    for row in rows:
+        content = json.loads(row["content"])
+        if content.get("shelf_life") in SHELF_LIVES:
+            continue
+        label = (shipped.get(row["ingredient_id"]) or {}).get("shelf_life")
+        if label not in SHELF_LIVES:
+            unlabeled.append(row["ingredient_id"])
+            continue
+        content["shelf_life"] = label
+        conn.execute(
+            "UPDATE ingredients SET content = ? WHERE ingredient_id = ?",
+            (
+                json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                row["ingredient_id"],
+            ),
+        )
+    if unlabeled:
+        raise DatabaseError(
+            "migration 6 cannot label stored ingredients missing from "
+            f"{INGREDIENT_LABELS_PATH}: {', '.join(sorted(unlabeled))}"
+        )
+
+
+# Each migration is (version, name, steps). A step is an SQL statement (separate strings
+# because triggers contain semicolons and sqlite3.executescript would commit) or a callable
+# that receives the connection inside the migration's transaction.
+MIGRATIONS: tuple[tuple[int, str, tuple[Step, ...]], ...] = (
     (
         1,
         "initial schema",
@@ -186,6 +234,34 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "CREATE INDEX sessions_user ON sessions (user_id)",
         ),
     ),
+    (
+        6,
+        "long-lasting and fresh shopping: ingredient shelf life, trip membership per group",
+        (
+            _backfill_shelf_life,
+            # Membership becomes (trip, plan, group); (plan, group) is on at most one trip.
+            # Existing rows expand to both groups and keep their frozen covered revisions.
+            """CREATE TABLE shopping_trip_weeks_v6 (
+                trip_id TEXT NOT NULL REFERENCES shopping_trips (trip_id) ON DELETE CASCADE,
+                plan_id TEXT NOT NULL REFERENCES plans (plan_id),
+                shelf_group TEXT NOT NULL CHECK (shelf_group IN ('long_lasting', 'fresh')),
+                covered_revision INTEGER,
+                covered_snapshot_id TEXT,
+                PRIMARY KEY (trip_id, plan_id, shelf_group),
+                UNIQUE (plan_id, shelf_group),
+                CHECK ((covered_revision IS NULL) = (covered_snapshot_id IS NULL)),
+                FOREIGN KEY (plan_id, covered_revision)
+                    REFERENCES plan_revisions (plan_id, revision)
+            )""",
+            """INSERT INTO shopping_trip_weeks_v6
+                   (trip_id, plan_id, shelf_group, covered_revision, covered_snapshot_id)
+               SELECT w.trip_id, w.plan_id, g.shelf_group, w.covered_revision, w.covered_snapshot_id
+               FROM shopping_trip_weeks w
+               CROSS JOIN (SELECT 'long_lasting' AS shelf_group UNION ALL SELECT 'fresh') g""",
+            "DROP TABLE shopping_trip_weeks",
+            "ALTER TABLE shopping_trip_weeks_v6 RENAME TO shopping_trip_weeks",
+        ),
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 
@@ -249,8 +325,11 @@ def migrate(conn: sqlite3.Connection) -> list[int]:
             # Re-check under the write lock: a concurrent process may have applied it.
             if version <= current_version(conn):
                 continue
-            for statement in statements:
-                conn.execute(statement)
+            for step in statements:
+                if callable(step):
+                    step(conn)
+                else:
+                    conn.execute(step)
             conn.execute(
                 "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
                 (version, name, _utcnow_text()),

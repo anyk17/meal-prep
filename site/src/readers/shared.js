@@ -74,7 +74,10 @@ export function normalizeError(code, message, details = []) { return new ReaderE
 
 // ---- Shopping trips (phase 4) ----
 const UNITS = ['g', 'ml', 'units'];
-const tripWeekKeys = ['plan_id','week_start','week_end','revision','snapshot_id','current_revision','coverage','changed_since_shopping'];
+const tripWeekKeys = ['plan_id','week_start','week_end','revision','snapshot_id','current_revision','groups','coverage','changed_since_shopping'];
+const SHELF_LIVES = ['long_lasting', 'fresh'];
+// Non-empty, unique, in canonical order (long_lasting before fresh).
+const validGroups = g => Array.isArray(g) && g.length > 0 && g.every(x => SHELF_LIVES.includes(x)) && new Set(g).size === g.length && g.every((x, i) => i === 0 || SHELF_LIVES.indexOf(g[i - 1]) < SHELF_LIVES.indexOf(x));
 const tripKeys = ['trip_id','name','status','version','created_at','updated_at','completed_at','weeks','items'];
 export function validateTrip(t) {
   if (!exactKeys(t, tripKeys) || !idPattern.test(t.trip_id || '') || typeof t.name !== 'string' || !t.name || t.name.length > 80 || !['open','done'].includes(t.status) || !Number.isInteger(t.version) || t.version < 1 || !validTimestamp(t.created_at) || !validTimestamp(t.updated_at) || !Array.isArray(t.weeks) || !t.weeks.length || !Array.isArray(t.items)) fail('Invalid shopping trip');
@@ -82,7 +85,7 @@ export function validateTrip(t) {
   const planIds = new Set();
   let previous = '';
   for (const w of t.weeks) {
-    if (!exactKeys(w, tripWeekKeys) || !idPattern.test(w.plan_id || '') || !validDate(w.week_start) || !validDate(w.week_end) || w.week_end !== addDays(w.week_start, 6) || weekDay(w.week_start) !== 1 || !Number.isInteger(w.revision) || w.revision < 1 || !Number.isInteger(w.current_revision) || w.current_revision < 1 || typeof w.snapshot_id !== 'string' || !w.snapshot_id || typeof w.changed_since_shopping !== 'boolean') fail('Invalid shopping trip week');
+    if (!exactKeys(w, tripWeekKeys) || !idPattern.test(w.plan_id || '') || !validDate(w.week_start) || !validDate(w.week_end) || w.week_end !== addDays(w.week_start, 6) || weekDay(w.week_start) !== 1 || !Number.isInteger(w.revision) || w.revision < 1 || !Number.isInteger(w.current_revision) || w.current_revision < 1 || typeof w.snapshot_id !== 'string' || !w.snapshot_id || typeof w.changed_since_shopping !== 'boolean' || !validGroups(w.groups)) fail('Invalid shopping trip week');
     if (w.week_start <= previous || planIds.has(w.plan_id)) fail('Shopping trip weeks must be unique and ordered by week start');
     previous = w.week_start; planIds.add(w.plan_id);
     if (w.coverage !== (t.status === 'open' ? 'on_list' : 'covered')) fail('Shopping trip week coverage does not match the trip status');
@@ -91,7 +94,7 @@ export function validateTrip(t) {
   }
   const seen = new Set();
   for (const i of t.items) {
-    if (!exactKeys(i, ['ingredient_id','display','quantity','unit','section','plan_ids']) || typeof i.ingredient_id !== 'string' || !i.ingredient_id || typeof i.display !== 'string' || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || i.quantity < 0 || !UNITS.includes(i.unit) || typeof i.section !== 'string' || !Array.isArray(i.plan_ids) || !i.plan_ids.length || i.plan_ids.some(id => !planIds.has(id)) || new Set(i.plan_ids).size !== i.plan_ids.length) fail('Invalid shopping trip item');
+    if (!exactKeys(i, ['ingredient_id','display','quantity','unit','section','shelf_life','plan_ids']) || typeof i.ingredient_id !== 'string' || !i.ingredient_id || typeof i.display !== 'string' || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || i.quantity < 0 || !UNITS.includes(i.unit) || typeof i.section !== 'string' || !SHELF_LIVES.includes(i.shelf_life) || !Array.isArray(i.plan_ids) || !i.plan_ids.length || i.plan_ids.some(id => !planIds.has(id)) || new Set(i.plan_ids).size !== i.plan_ids.length) fail('Invalid shopping trip item');
     const key = `${i.ingredient_id}\u0000${i.unit}`;
     if (seen.has(key)) fail('Duplicate shopping trip item'); seen.add(key);
   }
@@ -103,25 +106,34 @@ export function validateTripList(result) {
   for (const trip of result.items) {
     if (ids.has(trip.trip_id)) fail('Duplicate shopping trip');
     ids.add(trip.trip_id);
-    for (const week of trip.weeks) { if (weeks.has(week.plan_id)) fail('A week is on more than one shopping trip'); weeks.add(week.plan_id); }
+    for (const week of trip.weeks) for (const group of week.groups) { const pair = `${week.plan_id}|${group}`; if (weeks.has(pair)) fail('A week and group is on more than one shopping trip'); weeks.add(pair); }
   }
+}
+function validGroupCoverage(g) {
+  return exactKeys(g, ['coverage', 'trip_id', 'changed_since_shopping']) && ['not_covered', 'on_list', 'covered'].includes(g.coverage)
+    && (g.coverage === 'not_covered' ? g.trip_id === null : idPattern.test(g.trip_id || ''))
+    && typeof g.changed_since_shopping === 'boolean' && (!g.changed_since_shopping || g.coverage === 'covered');
 }
 export function validateCoverage(result) {
   if (!result || Object.keys(result).join(',') !== 'items' || !Array.isArray(result.items)) fail('Invalid coverage response');
   const ids = new Set();
   for (const c of result.items) {
-    if (!exactKeys(c, ['plan_id','week_start','week_end','coverage','trip_id','changed_since_shopping']) || !idPattern.test(c.plan_id || '') || !validDate(c.week_start) || !validDate(c.week_end) || c.week_end !== addDays(c.week_start, 6) || !['not_covered','on_list','covered'].includes(c.coverage) || (c.coverage === 'not_covered' ? c.trip_id !== null : !idPattern.test(c.trip_id || '')) || typeof c.changed_since_shopping !== 'boolean' || (c.changed_since_shopping && c.coverage !== 'covered') || ids.has(c.plan_id)) fail('Invalid week coverage');
+    if (!exactKeys(c, ['plan_id','week_start','week_end','groups']) || !idPattern.test(c.plan_id || '') || !validDate(c.week_start) || !validDate(c.week_end) || c.week_end !== addDays(c.week_start, 6) || !exactKeys(c.groups, SHELF_LIVES) || !SHELF_LIVES.every(g => validGroupCoverage(c.groups[g])) || ids.has(c.plan_id)) fail('Invalid week coverage');
     ids.add(c.plan_id);
   }
 }
-// Coverage for plans overlapping a range, derived from trips (the static publication has no coverage endpoint).
+// Coverage for plans overlapping a range, derived from trips (the static publication has no coverage endpoint). Per (week, group).
 export function deriveCoverage(planSummaries, trips, range) {
-  const byPlan = new Map();
-  for (const trip of trips) for (const week of trip.weeks) byPlan.set(week.plan_id, { trip, week });
-  const items = planSummaries.filter(s => s.week_start <= range.to && s.week_end >= range.from).sort((a, b) => a.week_start.localeCompare(b.week_start)).map(s => {
-    const hit = byPlan.get(s.plan_id);
-    return { plan_id: s.plan_id, week_start: s.week_start, week_end: s.week_end, coverage: hit ? hit.week.coverage : 'not_covered', trip_id: hit ? hit.trip.trip_id : null, changed_since_shopping: hit ? hit.week.changed_since_shopping : false };
-  });
+  const byPair = new Map();
+  for (const trip of trips) for (const week of trip.weeks) for (const group of week.groups) byPair.set(`${week.plan_id}|${group}`, { trip, week });
+  const groupCoverage = (planId, group) => {
+    const hit = byPair.get(`${planId}|${group}`);
+    return { coverage: hit ? hit.week.coverage : 'not_covered', trip_id: hit ? hit.trip.trip_id : null, changed_since_shopping: hit ? hit.week.changed_since_shopping : false };
+  };
+  const items = planSummaries.filter(s => s.week_start <= range.to && s.week_end >= range.from).sort((a, b) => a.week_start.localeCompare(b.week_start)).map(s => ({
+    plan_id: s.plan_id, week_start: s.week_start, week_end: s.week_end,
+    groups: { long_lasting: groupCoverage(s.plan_id, 'long_lasting'), fresh: groupCoverage(s.plan_id, 'fresh') },
+  }));
   return { items };
 }
 export const validTripId = value => typeof value === 'string' && idPattern.test(value);

@@ -777,10 +777,11 @@ paths:
         both halves. The swapped-in recipe is not extended to dinner automatically.
         Groceries use the base revision's captured pantry. grocery_delta lists only changed
         ingredient/unit rows (before and after are 0 when absent), sorted by section, then
-        display. trip is null when the week is on no shopping trip; otherwise it names the trip
-        and its status. extra_needed is non-empty only for a done trip: the positive quantity
-        differences between the swapped week's groceries and the week's groceries at the
-        revision the trip covered. A swap to the variant already in the slot previews as no
+        display. trips lists every shopping list the week is on (empty when none), each with its
+        status and the groups of this week it covers. extra_needed is non-empty only for a
+        done list: the positive quantity differences between the swapped week's groceries and
+        the week's groceries at the revision the list covered, limited to the ingredients of
+        the groups that list covers for this week. A swap to the variant already in the slot previews as no
         change (empty changes and grocery_delta). Only slots dated today or later in the
         household timezone can be swapped, including slots of a started week. Requires a
         SQLite-backed API (403 read_only otherwise) and a logged-in user (401 unauthenticated).
@@ -1150,7 +1151,7 @@ paths:
       operationId: createShoppingTrip
       summary: Create an open shopping trip for weeks
       description: |-
-        Creates an open trip (version 1) covering the given plans. A plan belongs to at most one trip of any status (409 week_already_on_trip). name is an optional short label; it defaults to the covered date range. Trips never modify plans or create plan revisions. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Creates an open trip (version 1) covering the given plans for the given groups (default both). A (plan, group) pair belongs to at most one trip of any status (409 week_already_on_trip, details name the plan and the group). name is an optional short label; it defaults to the covered date range. Trips never modify plans or create plan revisions. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       requestBody:
         required: true
         description: Plans to cover and an optional label.
@@ -1262,7 +1263,7 @@ paths:
       operationId: addShoppingTripWeek
       summary: Add a week to an open trip
       description: |-
-        Adds a plan's week to an open trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when the plan is already on a trip. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Adds a plan's week to an open trip for the given groups (default both). A week already on the trip gains the groups it lacks; if it has all of them the request is a 409 week_already_on_trip. 409 trip_done when the trip is done (reopen it first), 409 week_already_on_trip when one of the (plan, group) pairs is already on another trip (details name the group). Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
       requestBody:
@@ -1307,11 +1308,12 @@ paths:
       operationId: removeShoppingTripWeek
       summary: Remove a week from an open trip
       description: |-
-        Removes the plan's week from an open trip. 409 trip_done on a done trip (reopen it first), 409 last_week for the last remaining week (delete the trip instead), 404 week_not_on_trip when the plan is not on this trip. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
+        Removes the plan's week from an open trip, or with the group query parameter only that group of it (the week entry disappears when no group is left). 409 trip_done on a done trip (reopen it first), 409 last_week when nothing else would remain (delete the trip instead), 404 week_not_on_trip when the plan, or the requested group of it, is not on this trip. An unknown group is 400 invalid_request. Requires a logged-in user (401 unauthenticated) and a SQLite-backed API (otherwise 403 read_only).
       parameters:
         - $ref: '#/components/parameters/TripId'
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/ExpectedVersion'
+        - $ref: '#/components/parameters/TripGroup'
       security:
         - cookieAuth: []
       responses:
@@ -1437,7 +1439,7 @@ paths:
       operationId: getCoverage
       summary: Read week coverage for a date range
       description: |-
-        For every plan whose Monday-through-Sunday week overlaps the inclusive range (same range rules as listPlans), reports coverage derived from shopping trips: not_covered (no trip), on_list (open trip) or covered (done trip), with the trip_id and changed_since_shopping (true when the plan's current revision is newer than the revision the done trip covered). Coverage is never stored on the plan, so plan summaries are unchanged. When the API is not SQLite-backed every plan is not_covered.
+        For every plan whose Monday-through-Sunday week overlaps the inclusive range (same range rules as listPlans), reports coverage per shelf-life group (long_lasting and fresh) derived from shopping trips: not_covered (no trip), on_list (open trip) or covered (done trip), with the trip_id and changed_since_shopping (true when the plan's current revision is newer than the revision the done trip covered). Coverage is never stored on the plan, so plan summaries are unchanged. When the API is not SQLite-backed every group of every plan is not_covered.
       parameters:
         - $ref: '#/components/parameters/CoverageFrom'
         - $ref: '#/components/parameters/CoverageTo'
@@ -1456,7 +1458,7 @@ paths:
                 $ref: '#/components/schemas/CoverageList'
               examples:
                 coverage:
-                  summary: Covered, on a list, and not covered
+                  summary: Covered, on a list (groups can differ), and not covered
                   externalValue: examples/coverage.json
         '400':
           $ref: '#/components/responses/InvalidRequest'
@@ -1868,6 +1870,13 @@ components:
         minimum: 1
         maximum: 2147483647
       example: 2
+    TripGroup:
+      name: group
+      in: query
+      required: false
+      description: Remove only this shelf-life group of the week from the trip. Without it the whole week is removed.
+      schema:
+        $ref: '#/components/schemas/ShelfLife'
     CoverageFrom:
       name: from
       in: query
@@ -2896,7 +2905,7 @@ components:
     SwapTripImpact:
       type: object
       additionalProperties: false
-      required: [trip_id, name, status, extra_needed]
+      required: [trip_id, name, status, groups, extra_needed]
       properties:
         trip_id:
           type: string
@@ -2906,15 +2915,22 @@ components:
         status:
           type: string
           enum: [open, done]
+        groups:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: The groups of the swapped week this list covers, ordered long_lasting, fresh.
+          items:
+            $ref: '#/components/schemas/ShelfLife'
         extra_needed:
           type: array
-          description: Always empty for an open trip (it follows the new revision). For a done trip, what the swapped week needs beyond what the trip covered.
+          description: Always empty for an open list (it follows the new revision). For a done list, what the swapped week needs beyond what the list covered, for the ingredients of its groups only.
           items:
             $ref: '#/components/schemas/ExtraNeededRow'
     SwapPreview:
       type: object
       additionalProperties: false
-      required: [plan_id, base_revision, changes, grocery_delta, rule_warnings, trip]
+      required: [plan_id, base_revision, changes, grocery_delta, rule_warnings, trips]
       properties:
         plan_id:
           type: string
@@ -2938,11 +2954,12 @@ components:
           description: Every weekly-rule violation the swapped plan has (advisory).
           items:
             $ref: '#/components/schemas/RuleWarning'
-        trip:
-          oneOf:
-            - $ref: '#/components/schemas/SwapTripImpact'
-            - type: 'null'
-          description: The shopping trip holding this week, or null.
+        trips:
+          type: array
+          description: Every shopping list the week is on, oldest first; empty when the week is on none. A week can be on two lists (one per group).
+          items:
+            $ref: '#/components/schemas/SwapTripImpact'
+
     SwapResult:
       type: object
       additionalProperties: false
@@ -3013,10 +3030,28 @@ components:
       type: string
       enum: [not_covered, on_list, covered]
       description: not_covered (no trip), on_list (open trip), covered (done trip).
+    ShelfLife:
+      type: string
+      enum: [long_lasting, fresh]
+      description: How an ingredient is bought. Long-lasting (frozen proteins, rice, oils, condiments, spices) or fresh (vegetables, herbs, dairy, bread). Labels come from the planner inputs (data/ingredients.yml) at read time, not from plan snapshots.
+    GroupCoverage:
+      type: object
+      additionalProperties: false
+      required: [coverage, trip_id, changed_since_shopping]
+      description: Coverage of one week for one shelf-life group.
+      properties:
+        coverage:
+          $ref: '#/components/schemas/CoverageState'
+        trip_id:
+          anyOf:
+            - {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+            - type: 'null'
+        changed_since_shopping:
+          type: boolean
     ShoppingTripWeek:
       type: object
       additionalProperties: false
-      required: [plan_id, week_start, week_end, revision, snapshot_id, current_revision, coverage, changed_since_shopping]
+      required: [plan_id, week_start, week_end, revision, snapshot_id, current_revision, coverage, changed_since_shopping, groups]
       properties:
         plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
         week_start:
@@ -3044,10 +3079,18 @@ components:
         changed_since_shopping:
           type: boolean
           description: True on a done trip when current_revision is newer than revision.
+        groups:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          description: The shelf-life groups of this week on the trip, ordered long_lasting, fresh. A week appears once with all its groups on the trip.
+          items:
+            $ref: '#/components/schemas/ShelfLife'
     ShoppingTripItem:
       type: object
       additionalProperties: false
-      required: [ingredient_id, display, quantity, unit, section, plan_ids]
+      required: [ingredient_id, display, quantity, unit, section, shelf_life, plan_ids]
       properties:
         ingredient_id:
           type: string
@@ -3057,12 +3100,14 @@ components:
         quantity:
           type: number
           minimum: 0
-          description: Sum over the contributing weeks for this ingredient and unit.
+          description: Sum over the contributing weeks (those whose groups include this item's shelf_life) for this ingredient and unit.
         unit:
           type: string
           enum: [g, ml, units]
         section:
           type: string
+        shelf_life:
+          $ref: '#/components/schemas/ShelfLife'
         plan_ids:
           type: array
           description: Plans whose grocery rows contribute to this item, in week order.
@@ -3103,7 +3148,7 @@ components:
             $ref: '#/components/schemas/ShoppingTripWeek'
         items:
           type: array
-          description: Derived sum of the weeks' saved grocery rows per ingredient and unit, grouped by section.
+          description: Derived sum of the weeks' saved grocery rows per ingredient and unit, only for each week's covered groups, grouped by section. Each item carries its shelf_life.
           items:
             $ref: '#/components/schemas/ShoppingTripItem'
     ShoppingTripList:
@@ -3130,12 +3175,28 @@ components:
           type: [string, 'null']
           maxLength: 80
           description: Optional short label; defaults to the covered date range.
+        groups:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ShelfLife'
+          description: Groups to cover for every given week. Defaults to both.
     AddTripWeekRequest:
       type: object
       additionalProperties: false
       required: [plan_id, expected_version]
       properties:
         plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
+        groups:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ShelfLife'
+          description: Groups to cover. Defaults to both. A week already on the list gains the groups it lacks.
         expected_version:
           type: integer
           minimum: 1
@@ -3152,7 +3213,7 @@ components:
     WeekCoverage:
       type: object
       additionalProperties: false
-      required: [plan_id, week_start, week_end, coverage, trip_id, changed_since_shopping]
+      required: [plan_id, week_start, week_end, groups]
       properties:
         plan_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
         week_start:
@@ -3161,14 +3222,16 @@ components:
         week_end:
           type: string
           format: date
-        coverage:
-          $ref: '#/components/schemas/CoverageState'
-        trip_id:
-          anyOf:
-            - {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'}
-            - type: 'null'
-        changed_since_shopping:
-          type: boolean
+        groups:
+          type: object
+          additionalProperties: false
+          required: [long_lasting, fresh]
+          description: Coverage of the week per shelf-life group; each group is on at most one list.
+          properties:
+            long_lasting:
+              $ref: '#/components/schemas/GroupCoverage'
+            fresh:
+              $ref: '#/components/schemas/GroupCoverage'
     CoverageList:
       type: object
       additionalProperties: false

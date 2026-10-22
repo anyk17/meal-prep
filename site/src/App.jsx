@@ -5,6 +5,7 @@ import { RecipeModal } from './components/RecipeModal';
 import { WeekGrid } from './components/WeekGrid';
 import { MonthView } from './components/MonthView';
 import { TripsView } from './components/TripsView';
+import { coverageSummary, weekSelectable } from './tripModel.js';
 import { CoverageBadge, WeekCoverage } from './components/CoverageBadge';
 import { Utensils, Calendar, Moon, Sun, ChevronLeft, ChevronRight, LogIn, LogOut } from 'lucide-react';
 import { createApiReader } from './readers/api';
@@ -65,6 +66,7 @@ function App() {
   const [tripId, setTripId] = useState(null);
   const [tripNonce, setTripNonce] = useState(0);
   const [selectedPlans, setSelectedPlans] = useState([]);
+  const [monthCoverage, setMonthCoverage] = useState(() => new Map());
   const [review, setReview] = useState(null);
   const [swapSlot, setSwapSlot] = useState(null);
   const [swapNotice, setSwapNotice] = useState(null);
@@ -190,8 +192,8 @@ function App() {
   const renderWeekAccessory = row => (
     <>
       {canEditTrips && CreateTripBar && row.plan && (
-        <label className="inline-flex items-center gap-1.5 min-h-8 text-xs text-slate-600 dark:text-slate-300" title={row.coverage && row.coverage.coverage !== 'not_covered' ? `Already on ${row.coverage.trip_name || 'a shopping list'}` : 'Select for a new shopping list'}>
-          <input type="checkbox" className="w-5 h-5" aria-label={`Select week of ${row.weekStart} for a shopping list`} disabled={row.coverage?.coverage !== 'not_covered'}
+        <label className="inline-flex items-center gap-1.5 min-h-8 text-xs text-slate-600 dark:text-slate-300" title={row.coverage && !weekSelectable(row.coverage) ? `Already on a shopping list: ${coverageSummary(row.coverage)}` : 'Select for a shopping list'}>
+          <input type="checkbox" className="w-5 h-5" aria-label={`Select week of ${row.weekStart} for a shopping list`} disabled={!row.coverage || !weekSelectable(row.coverage)}
             checked={selectedPlans.includes(row.plan.plan_id)} onChange={() => togglePlan(row.plan.plan_id)} />
         </label>
       )}
@@ -291,11 +293,11 @@ function App() {
 
         {view === 'month' && (
           <MonthView reader={reader} month={month} onMonth={setMonth} thisMonth={monthOf(todayIn(plan?.timezone))} nonce={monthNonce}
-            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} />
+            canEdit={canEdit} MonthFill={MonthFill} onOpenWeek={openWeek} onReload={() => reloadMonth()} renderWeekAccessory={renderWeekAccessory} onCoverage={setMonthCoverage} />
         )}
         {view === 'month' && canEditTrips && CreateTripBar && (
           <Suspense fallback={null}>
-            <CreateTripBar planIds={selectedPlans} reader={reader} onClear={() => setSelectedPlans([])}
+            <CreateTripBar planIds={selectedPlans} coverage={monthCoverage} reader={reader} onClear={() => setSelectedPlans([])}
               onCreated={trip => { setSelectedPlans([]); setMonthNonce(value => value + 1); openTrip(trip.trip_id); }}
               onProblem={() => { setSelectedPlans([]); setMonthNonce(value => value + 1); }} />
           </Suspense>

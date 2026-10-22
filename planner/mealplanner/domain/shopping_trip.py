@@ -1,9 +1,9 @@
 """ShoppingTrip aggregate (UI: "shopping list"): invariants, item summation, week coverage.
 
-A trip covers a set of weekly plans and answers "what do we buy for these weeks?".
-It never modifies a plan. Everything here is pure: mutations return a new trip with
-``version + 1``; storage enforces the same invariants (one trip per plan, version
-compare-and-swap) atomically.
+A trip covers a set of weekly plans, each per shelf-life group (long_lasting, fresh), and
+answers "what do we buy for these weeks?". It never modifies a plan. Everything here is pure:
+mutations return a new trip with ``version + 1``; storage enforces the same invariants (one trip
+per (plan, group), version compare-and-swap) atomically.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
+from .catalog import ShelfLife
 from .snapshot import JsonObject
 
 OPEN = "open"
@@ -20,6 +21,10 @@ DONE = "done"
 NOT_COVERED = "not_covered"
 ON_LIST = "on_list"
 COVERED = "covered"
+
+LONG_LASTING = ShelfLife.LONG_LASTING.value
+FRESH = ShelfLife.FRESH.value
+GROUPS: tuple[str, ...] = (LONG_LASTING, FRESH)  # canonical order
 
 # ---------------------------------------------------------------- errors
 
@@ -42,13 +47,15 @@ class StaleVersion(TripError):
 
 
 class WeekAlreadyOnTrip(TripError):
-    """A plan already belongs to a trip (any status); a week is on at most one trip."""
+    """A (plan, group) pair already belongs to a trip (any status); it is on at most one trip."""
 
-    def __init__(self, plan_id: str, trip_id: str | None = None) -> None:
+    def __init__(self, plan_id: str, trip_id: str | None = None, group: str | None = None) -> None:
         where = f" {trip_id}" if trip_id else ""
-        super().__init__(f"plan {plan_id} is already on trip{where}")
+        what = f" ({group})" if group else ""
+        super().__init__(f"plan {plan_id}{what} is already on trip{where}")
         self.plan_id = plan_id
         self.trip_id = trip_id
+        self.group = group
 
 
 class TripDone(TripError):
@@ -60,15 +67,15 @@ class TripNotDone(TripError):
 
 
 class WeekNotOnTrip(TripError):
-    """The plan is not one of the trip's weeks."""
+    """The plan (or the requested group of it) is not on the trip."""
 
 
 class LastWeek(TripError):
-    """A trip keeps at least one week; delete the trip instead of removing its last week."""
+    """A trip keeps at least one week; delete the trip instead of removing its last week or group."""
 
 
 class InvalidTrip(TripError):
-    """Trip input is invalid (no weeks, duplicate weeks, bad name)."""
+    """Trip input is invalid (no weeks, duplicate weeks, bad name or groups)."""
 
 
 # ---------------------------------------------------------------- records
@@ -78,12 +85,26 @@ MAX_NAME_LENGTH = 80
 
 @dataclass(frozen=True)
 class TripWeek:
-    """One covered week. covered_* are set exactly when the trip is done."""
+    """One covered week with the groups of it on the list. covered_* are set exactly when done."""
 
     plan_id: str
     week_start: date
     covered_revision: int | None = None
     covered_snapshot_id: str | None = None
+    groups: tuple[str, ...] = GROUPS  # non-empty, canonical order
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "groups", clean_groups(self.groups))
+
+
+def clean_groups(groups: Iterable[str] | None) -> tuple[str, ...]:
+    """Canonical (long_lasting, fresh) order; None means both. Raises InvalidTrip when empty/unknown."""
+    if groups is None:
+        return GROUPS
+    wanted = list(groups)
+    if not wanted or any(g not in GROUPS for g in wanted):
+        raise InvalidTrip(f"groups must be a non-empty list of {', '.join(GROUPS)}")
+    return tuple(g for g in GROUPS if g in wanted)
 
 
 @dataclass(frozen=True)
@@ -143,7 +164,7 @@ def new_trip(
         raise InvalidTrip("a trip needs at least one week")
     if len({w.plan_id for w in weeks}) != len(weeks):
         raise InvalidTrip("plan_ids must be unique")
-    open_weeks = _sorted_weeks(TripWeek(w.plan_id, w.week_start) for w in weeks)
+    open_weeks = _sorted_weeks(TripWeek(w.plan_id, w.week_start, groups=w.groups) for w in weeks)
     return ShoppingTrip(trip_id, clean_name(name), OPEN, 1, now, now, open_weeks)
 
 
@@ -157,23 +178,41 @@ def _bump(trip: ShoppingTrip, now: datetime, **changes: object) -> ShoppingTrip:
 
 
 def add_week(trip: ShoppingTrip, week: TripWeek, expected: int, now: datetime) -> ShoppingTrip:
+    """Add the week's groups; a week already on the list is extended with the new groups."""
     require_version(trip, expected)
     if trip.status == DONE:
         raise TripDone("trip is done; reopen it to change its weeks")
-    if week.plan_id in trip.plan_ids:
-        raise WeekAlreadyOnTrip(week.plan_id, trip.trip_id)
-    return _bump(trip, now, weeks=_sorted_weeks((*trip.weeks, TripWeek(week.plan_id, week.week_start))))
+    existing = next((w for w in trip.weeks if w.plan_id == week.plan_id), None)
+    if existing is None:
+        return _bump(
+            trip, now,
+            weeks=_sorted_weeks((*trip.weeks, TripWeek(week.plan_id, week.week_start, groups=week.groups))),
+        )  # fmt: skip
+    new = [g for g in week.groups if g not in existing.groups]
+    if not new:  # nothing to add: every requested group is already on this list
+        raise WeekAlreadyOnTrip(week.plan_id, trip.trip_id, week.groups[0])
+    merged = replace(existing, groups=clean_groups((*existing.groups, *new)))
+    return _bump(trip, now, weeks=_sorted_weeks(merged if w is existing else w for w in trip.weeks))
 
 
-def remove_week(trip: ShoppingTrip, plan_id: str, expected: int, now: datetime) -> ShoppingTrip:
+def remove_week(
+    trip: ShoppingTrip, plan_id: str, expected: int, now: datetime, group: str | None = None
+) -> ShoppingTrip:
+    """Remove the whole week, or one group of it (the week goes when no group is left)."""
     require_version(trip, expected)
     if trip.status == DONE:
         raise TripDone("trip is done; reopen it to remove a week")
-    if plan_id not in trip.plan_ids:
+    week = next((w for w in trip.weeks if w.plan_id == plan_id), None)
+    if week is None or (group is not None and group not in week.groups):
         raise WeekNotOnTrip(plan_id)
-    if len(trip.weeks) == 1:
+    if group is not None and group not in GROUPS:
+        raise InvalidTrip(f"group must be one of {', '.join(GROUPS)}")
+    left = tuple(g for g in week.groups if g != group) if group is not None else ()
+    if not left and len(trip.weeks) == 1:
         raise LastWeek("a trip needs at least one week; delete the trip instead")
-    return _bump(trip, now, weeks=tuple(w for w in trip.weeks if w.plan_id != plan_id))
+    others = tuple(w for w in trip.weeks if w.plan_id != plan_id)
+    kept = (replace(week, groups=left),) if left else ()
+    return _bump(trip, now, weeks=_sorted_weeks((*others, *kept)))
 
 
 def mark_done(
@@ -187,7 +226,7 @@ def mark_done(
     if trip.status == DONE:
         raise TripNotDone("trip is already done")
     weeks = tuple(
-        TripWeek(w.plan_id, w.week_start, covered[w.plan_id][0], covered[w.plan_id][1])
+        TripWeek(w.plan_id, w.week_start, covered[w.plan_id][0], covered[w.plan_id][1], w.groups)
         for w in trip.weeks
     )
     return _bump(trip, now, status=DONE, weeks=weeks, completed_at=now)
@@ -197,25 +236,39 @@ def reopen(trip: ShoppingTrip, expected: int, now: datetime) -> ShoppingTrip:
     require_version(trip, expected)
     if trip.status == OPEN:
         raise TripNotDone("trip is not done")
-    weeks = tuple(TripWeek(w.plan_id, w.week_start) for w in trip.weeks)
+    weeks = tuple(TripWeek(w.plan_id, w.week_start, groups=w.groups) for w in trip.weeks)
     return _bump(trip, now, status=OPEN, weeks=weeks, completed_at=None)
 
 
 # ---------------------------------------------------------------- derived views
 
 
-def sum_items(weeks: Sequence[tuple[str, JsonObject]]) -> list[JsonObject]:
-    """Sum saved weekly grocery rows per (ingredient_id, unit).
+def sum_items(
+    weeks: Sequence[tuple[str, JsonObject, Sequence[str]]],
+    labels: Mapping[str, str],
+    *,
+    skip_unlabeled: bool = False,
+) -> list[JsonObject]:
+    """Sum saved weekly grocery rows per (ingredient_id, unit), only for each week's covered groups.
 
-    weeks is [(plan_id, shopping_list)] in week order. Each item lists the plan_ids
-    that contribute. Rows keep first-seen order, grouped by first-seen section.
-    No pantry logic: the weekly rows already reflect their captured pantry.
+    weeks is [(plan_id, shopping_list, groups)] in week order; labels maps ingredient_id to its
+    shelf life. Each item carries its shelf_life and the plan_ids that contribute. Rows keep
+    first-seen order, grouped by first-seen section. No pantry logic: the weekly rows already
+    reflect their captured pantry. An ingredient without a label is an error, or skipped with
+    skip_unlabeled (publication checks that only know the labels the bundle shows).
     """
     totals: dict[tuple[str, str], JsonObject] = {}
     section_order: dict[str, int] = {}
-    for plan_id, shopping in weeks:
+    for plan_id, shopping, groups in weeks:
         for section, lines in shopping["sections"].items():
             for line in lines:
+                label = labels.get(line["ingredient_id"])
+                if label is None:
+                    if skip_unlabeled:
+                        continue
+                    raise InvalidTrip(f"ingredient {line['ingredient_id']} has no shelf life")
+                if label not in groups:
+                    continue
                 key = (line["ingredient_id"], line["unit"])
                 item = totals.get(key)
                 if item is None:
@@ -226,6 +279,7 @@ def sum_items(weeks: Sequence[tuple[str, JsonObject]]) -> list[JsonObject]:
                         "quantity": 0.0,
                         "unit": line["unit"],
                         "section": line["section"],
+                        "shelf_life": label,
                         "plan_ids": [],
                     }
                 item["quantity"] += line["quantity"]
@@ -241,7 +295,7 @@ def sum_items(weeks: Sequence[tuple[str, JsonObject]]) -> list[JsonObject]:
 def week_coverage(
     plan_id: str, current_revision: int, trip: ShoppingTrip | None
 ) -> tuple[str, bool]:
-    """(coverage, changed_since_shopping) for one plan given the trip that holds it, if any."""
+    """(coverage, changed_since_shopping) for one (plan, group) given the trip that holds it, if any."""
     if trip is None:
         return NOT_COVERED, False
     if trip.status == OPEN:

@@ -65,8 +65,10 @@ export function createStaticReader(indexPath = 'publication/index.json', baseUrl
         if (!planEntry) fail(`Shopping trip ${tripId} covers a week that is not published`);
         if (planEntry.summary.week_start !== week.week_start || planEntry.summary.week_end !== week.week_end) fail(`Shopping trip ${tripId} disagrees with the published plan dates`);
         if (trip.status === 'open' && (week.revision !== planEntry.summary.revision || week.snapshot_id !== planEntry.summary.snapshot_id || week.current_revision !== planEntry.summary.revision)) fail(`Open shopping trip ${tripId} is not coherent with the published plan`);
-        if (tripWeeks.has(week.plan_id)) fail('A published week is on more than one shopping trip');
-        tripWeeks.add(week.plan_id);
+        for (const group of week.groups) {
+          if (tripWeeks.has(`${week.plan_id}|${group}`)) fail('A published week is on more than one shopping trip');
+          tripWeeks.add(`${week.plan_id}|${group}`);
+        }
       }
       tripEntry.trip = trip;
     }

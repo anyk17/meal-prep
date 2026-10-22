@@ -36,6 +36,13 @@ class IngredientKind(str, Enum):
     OTHER = "other"
 
 
+class ShelfLife(str, Enum):
+    """How often an ingredient is bought: monthly staples or fresh produce/dairy."""
+
+    LONG_LASTING = "long_lasting"
+    FRESH = "fresh"
+
+
 class CarbStrategy(str, Enum):
     """Recipe carb strategy."""
 
@@ -56,6 +63,7 @@ class Ingredient(BaseModel):
     unit: str
     section: str
     kind: IngredientKind
+    shelf_life: ShelfLife  # required: groups shopping list items (long_lasting | fresh)
     default_qty_g: Optional[float] = None
     max_times_week: Optional[float] = None
     notes: Optional[str] = None

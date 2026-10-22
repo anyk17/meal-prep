@@ -1,6 +1,7 @@
 // Write client for the home (API-mode) deployment only. It is deliberately separate from the
 // read-only reader interface and is only ever imported through a dynamic import that the static
 // (GitHub Pages) build removes.
+import { createTripBody, addWeekBody, removeWeekPath } from '../tripModel.js';
 import { ReaderError, normalizeError, validatePair, validateTrip } from '../readers/shared.js';
 import { notifyIfUnauthenticated } from '../auth/authStore.js';
 
@@ -135,20 +136,19 @@ export function createPlanEditor(base = '/api/v1') {
       return result;
     },
     // ---- Shopping trips. Every write carries the trip version the user is looking at; 409 stale_version means refetch. ----
-    async createTrip(planIds, name) {
+    async createTrip(planIds, name, groups) {
       if (!Array.isArray(planIds) || !planIds.length || planIds.length > 60 || new Set(planIds).size !== planIds.length) throw new ReaderError('invalid_request', 'Choose at least one week.');
       planIds.forEach(id => requireId(id, 'plan identity'));
-      const body = { plan_ids: planIds };
-      if (typeof name === 'string' && name.trim()) body.name = name.trim().slice(0, 80);
-      return checkTrip(await request('POST', '/shopping-trips', { body }));
+      return checkTrip(await request('POST', '/shopping-trips', { body: createTripBody(planIds, name, groups) }));
     },
-    async addTripWeek(tripId, planId, expectedVersion) {
+    async addTripWeek(tripId, planId, expectedVersion, groups) {
       requireId(tripId, 'shopping list identity'); requireId(planId, 'plan identity'); requireVersion(expectedVersion);
-      return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/weeks`, { body: { plan_id: planId, expected_version: expectedVersion } }), tripId);
+      return checkTrip(await request('POST', `/shopping-trips/${encodeURIComponent(tripId)}/weeks`, { body: addWeekBody(planId, expectedVersion, groups) }), tripId);
     },
-    async removeTripWeek(tripId, planId, expectedVersion) {
+    // `group` removes one shelf-life group from the week; without it the whole week leaves the list.
+    async removeTripWeek(tripId, planId, expectedVersion, group) {
       requireId(tripId, 'shopping list identity'); requireId(planId, 'plan identity'); requireVersion(expectedVersion);
-      return checkTrip(await request('DELETE', `/shopping-trips/${encodeURIComponent(tripId)}/weeks/${encodeURIComponent(planId)}?expected_version=${expectedVersion}`), tripId);
+      return checkTrip(await request('DELETE', removeWeekPath(tripId, planId, expectedVersion, group)), tripId);
     },
     async markTripDone(tripId, expectedVersion) {
       requireId(tripId, 'shopping list identity'); requireVersion(expectedVersion);

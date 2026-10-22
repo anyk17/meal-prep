@@ -35,3 +35,7 @@ class PlannerInputs:
             raise ValueError(
                 "Invalid planner inputs:\n" + "\n".join(f"- {error}" for error in errors)
             )
+
+    def shelf_lives(self) -> dict[str, str]:
+        """ingredient_id -> shelf life value ("long_lasting" | "fresh")."""
+        return {ing_id: ing.shelf_life.value for ing_id, ing in self.ingredients.items()}

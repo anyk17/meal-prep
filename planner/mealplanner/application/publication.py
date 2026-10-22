@@ -190,7 +190,16 @@ def _check_trips(
     ids = [e["trip_id"] for e in entries]
     if ids != sorted(set(ids)):
         errors.append("shopping_trips must be sorted by unique trip_id")
-    owner: dict[str, str] = {}
+    owner: dict[tuple[str, str], str] = {}  # (plan_id, group) -> trip_id
+    labels: dict[str, str] = {}  # ingredient_id -> shelf_life, as the bundle's trip items show it
+    for entry in entries:
+        trip = files.get(trip_path(entry["trip_id"]))
+        for item in (trip or {}).get("items") or []:
+            known = labels.setdefault(item["ingredient_id"], item.get("shelf_life"))
+            if known != item.get("shelf_life"):
+                errors.append(
+                    f"ingredient {item['ingredient_id']} has conflicting shelf_life values in trip items"
+                )
     for entry in entries:
         trip_id = entry["trip_id"]
         if not SAFE_ID.fullmatch(trip_id) or entry.get("path") != trip_path(trip_id):
@@ -209,8 +218,14 @@ def _check_trips(
             errors.append(f"trip {trip_id}: needs at least one week")
         for week in weeks:
             plan_id = week["plan_id"]
-            if owner.setdefault(plan_id, trip_id) != trip_id:
-                errors.append(f"trip {trip_id}: plan {plan_id} is already on trip {owner[plan_id]}")
+            groups = week.get("groups") or []
+            if not groups or list(groups) != [g for g in trips.GROUPS if g in groups]:
+                errors.append(f"trip {trip_id}: week {plan_id} groups must be a non-empty subset in order {', '.join(trips.GROUPS)}")
+            for group in groups:
+                if owner.setdefault((plan_id, group), trip_id) != trip_id:
+                    errors.append(
+                        f"trip {trip_id}: plan {plan_id} ({group}) is already on trip {owner[(plan_id, group)]}"
+                    )
             summary = published.get(plan_id)
             if summary is None:
                 errors.append(f"trip {trip_id}: week {plan_id} has no entry in manifest plans")
@@ -225,9 +240,15 @@ def _check_trips(
             and w["revision"] == published[w["plan_id"]]["revision"]
             for w in weeks
         ):  # items must be the sums of the published shopping lists
-            expected = trips.sum_items([(w["plan_id"], files[shopping_path(w["plan_id"])]) for w in weeks])
+            expected = trips.sum_items(
+                [(w["plan_id"], files[shopping_path(w["plan_id"])], w.get("groups") or []) for w in weeks],
+                labels,
+                skip_unlabeled=True,
+            )
             if trip.get("items") != expected:
-                errors.append(f"trip {trip_id}: items must equal the sum of the weeks' shopping lists")
+                errors.append(
+                    f"trip {trip_id}: items must equal the sum of the covered groups' rows of the weeks' shopping lists"
+                )
     return errors
 
 

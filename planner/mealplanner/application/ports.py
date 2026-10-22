@@ -105,13 +105,13 @@ class ShoppingTripRepository(Protocol):
     """Storage boundary for ShoppingTrip aggregates (in-memory and SQLite adapters).
 
     Every write is atomic and enforces, in storage as well as in the domain, that a
-    plan belongs to at most one trip of any status. Trips only reference plans; they
+    (plan, shelf-life group) pair belongs to at most one trip of any status. Trips only reference plans; they
     never write them.
     """
 
     def create(self, trip: ShoppingTrip) -> None:
         """Insert a new trip with its weeks. Raises WeekAlreadyOnTrip when any of its
-        plans is already on a trip, PlanNotFound when a plan does not exist."""
+        (plan, group) pairs is already on a trip, PlanNotFound when a plan does not exist."""
 
     def get(self, trip_id: str) -> ShoppingTrip | None:
         """Return one trip, or None."""

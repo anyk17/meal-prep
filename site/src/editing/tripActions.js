@@ -2,7 +2,7 @@
 
 const MESSAGES = {
   stale_version: 'This shopping list changed since you opened it (another tab or device?). It was reloaded, so check it and try again.',
-  week_already_on_trip: 'That week is already on a shopping list. Remove it from that list first.',
+  week_already_on_trip: 'That week (or that part of it, long-lasting or fresh) is already on another shopping list. Remove it from that list first.',
   trip_done: 'This shopping list is done. Reopen it to change its weeks.',
   trip_not_done: 'This shopping list is not done. It was reloaded.',
   last_week: 'A list needs at least one week. Delete the list instead.',

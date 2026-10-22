@@ -121,23 +121,25 @@ class InMemoryShoppingTripRepository:
 
     def __init__(self) -> None:
         self._trips: dict[str, ShoppingTrip] = {}
-        self._owner: dict[str, str] = {}  # plan_id -> trip_id (the one-trip-per-week index)
+        self._owner: dict[tuple[str, str], str] = {}  # (plan_id, group) -> trip_id (one list per pair)
         self._lock = threading.Lock()
 
     def _claim(self, trip: ShoppingTrip) -> None:
-        for plan_id in trip.plan_ids:
-            owner = self._owner.get(plan_id)
-            if owner is not None and owner != trip.trip_id:
-                raise WeekAlreadyOnTrip(plan_id, owner)
+        for week in trip.weeks:
+            for group in week.groups:
+                owner = self._owner.get((week.plan_id, group))
+                if owner is not None and owner != trip.trip_id:
+                    raise WeekAlreadyOnTrip(week.plan_id, owner, group)
 
     def _release(self, trip_id: str) -> None:
-        for plan_id in [p for p, t in self._owner.items() if t == trip_id]:
-            del self._owner[plan_id]
+        for key in [k for k, t in self._owner.items() if t == trip_id]:
+            del self._owner[key]
 
     def _index(self, trip: ShoppingTrip) -> None:
         self._release(trip.trip_id)
-        for plan_id in trip.plan_ids:
-            self._owner[plan_id] = trip.trip_id
+        for week in trip.weeks:
+            for group in week.groups:
+                self._owner[(week.plan_id, group)] = trip.trip_id
 
     def create(self, trip: ShoppingTrip) -> None:
         with self._lock:

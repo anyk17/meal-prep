@@ -160,7 +160,7 @@ def serialize_swap_preview(p: SwapPreview) -> dict[str, Any]:
         "changes": [serialize_change(c) for c in p.changes],
         "grocery_delta": list(p.grocery_delta),
         "rule_warnings": list(p.rule_warnings),
-        "trip": p.trip,
+        "trips": list(p.trips),
     }
 
 

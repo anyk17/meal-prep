@@ -3,6 +3,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { addMonths, formatMonth, formatWeekRange, isSelectedMonth, monthBounds, monthsOfYear } from '../dates.js';
 import { buildMonthRows } from '../monthModel.js';
+import { decorateCoverage } from '../tripModel.js';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const nav = 'p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-50';
@@ -22,8 +23,7 @@ async function loadMonth(reader, month) {
     reader.getCoverage({ from: first, to: last }).catch(() => null),
     reader.listShoppingTrips().catch(() => null),
   ]);
-  const tripNames = new Map((trips?.items ?? []).map(trip => [trip.trip_id, trip.name]));
-  const coverageByPlan = new Map((coverage?.items ?? []).map(item => [item.plan_id, { ...item, trip_name: tripNames.get(item.trip_id) ?? null }]));
+  const coverageByPlan = new Map((coverage?.items ?? []).map(item => [item.plan_id, decorateCoverage(item, trips?.items)]));
   const rows = buildMonthRows(month, new Map(plans.map(plan => [plan.week_start, plan]))).map(row => ({ ...row, coverage: row.plan && coverage ? coverageByPlan.get(row.plan.plan_id) ?? null : null }));
   return { published, rows, selectedMonths: context?.selected_months };
 }
@@ -100,7 +100,7 @@ function WeekBlock({ row, month, staticMode, canEdit, onOpenWeek, renderWeekAcce
   );
 }
 
-export function MonthView({ reader, month, onMonth, thisMonth, nonce, canEdit, MonthFill, onOpenWeek, onReload, renderWeekAccessory }) {
+export function MonthView({ reader, month, onMonth, thisMonth, nonce, canEdit, MonthFill, onOpenWeek, onReload, renderWeekAccessory, onCoverage }) {
   const key = `${month}:${nonce}:${reader.mode}`;
   const [state, setState] = useState({ key: null });
   const [retry, setRetry] = useState(0);
@@ -115,6 +115,9 @@ export function MonthView({ reader, month, onMonth, thisMonth, nonce, canEdit, M
 
   const staticMode = reader.mode === 'static';
   const current = state.key === requestKey ? state : null;
+  const loadedRows = current?.rows;
+  // Lets the shopping-list bar see the coverage of the weeks on screen.
+  useEffect(() => { onCoverage?.(new Map((loadedRows ?? []).filter(row => row.plan && row.coverage).map(row => [row.plan.plan_id, row.coverage]))); }, [loadedRows, onCoverage]);
   const selectedMonths = current?.selectedMonths ?? reader.context?.selected_months;
   const published = staticMode && isSelectedMonth(month, selectedMonths);
 

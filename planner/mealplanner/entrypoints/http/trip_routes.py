@@ -36,7 +36,7 @@ TRIP_ERROR_MAP: list[tuple[type[Exception], int, str]] = [
 MESSAGES = {
     "stale_version": "The shopping list changed since you loaded it. Refetch and try again.",
     "trip_not_found": "No shopping list exists for the requested trip_id.",
-    "week_already_on_trip": "A week can be on only one shopping list. Remove it from the other list first.",
+    "week_already_on_trip": "A week can be on only one shopping list for each group. Remove it from the other list first.",
     "trip_done": "This shopping list is done. Reopen it to change its weeks.",
     "trip_not_done": "This shopping list is not in the state this action needs.",
     "week_not_on_trip": "That week is not on this shopping list.",
@@ -86,6 +86,19 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
             raise BodyError("expected_version", "expected_version must be a positive integer")
         return value
 
+    def groups_field(body: dict[str, Any]) -> list[str] | None:
+        groups = body.get("groups")
+        if groups is None:
+            return None
+        if (
+            not isinstance(groups, list)
+            or not 1 <= len(groups) <= len(trips.GROUPS)
+            or not all(isinstance(g, str) and g in trips.GROUPS for g in groups)
+            or len(set(groups)) != len(groups)
+        ):
+            raise BodyError("groups", f"groups must list each of {', '.join(trips.GROUPS)} at most once")
+        return groups
+
     def mapped(fn: Callable[[], Any]):
         try:
             return fn()
@@ -107,6 +120,8 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
                         ]
                     elif isinstance(exc, trips.WeekAlreadyOnTrip):
                         details = [{"field": "plan_id", "message": exc.plan_id}]
+                        if exc.group:
+                            details.append({"field": "group", "message": exc.group})
                         if exc.trip_id:
                             details.append({"field": "trip_id", "message": exc.trip_id})
                     return error(status, code, MESSAGES.get(code, str(exc)), details)
@@ -160,9 +175,14 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
                         "plan_id": s["plan_id"],
                         "week_start": s["week_start"],
                         "week_end": s["week_end"],
-                        "coverage": trips.NOT_COVERED,
-                        "trip_id": None,
-                        "changed_since_shopping": False,
+                        "groups": {
+                            group: {
+                                "coverage": trips.NOT_COVERED,
+                                "trip_id": None,
+                                "changed_since_shopping": False,
+                            }
+                            for group in trips.GROUPS
+                        },
                     }
                     for s in listed
                 ]
@@ -176,7 +196,7 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
             return denied
 
         def run():
-            body = _parse_body({"plan_ids", "name"})
+            body = _parse_body({"plan_ids", "name", "groups"})
             plan_ids = body.get("plan_ids")
             if (
                 not isinstance(plan_ids, list)
@@ -191,7 +211,7 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
                 raise BodyError("name", "name must be a string")
             if isinstance(name, str) and len(" ".join(name.split())) > trips.MAX_NAME_LENGTH:
                 raise BodyError("name", f"name must be at most {trips.MAX_NAME_LENGTH} characters")
-            view = service().create(plan_ids, name)
+            view = service().create(plan_ids, name, groups_field(body))
             response = jsonify(view)
             response.status_code = 201
             response.headers["Location"] = f"/api/v1/shopping-trips/{view['trip_id']}"
@@ -206,12 +226,12 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
             return denied
 
         def run():
-            body = _parse_body({"plan_id", "expected_version"})
+            body = _parse_body({"plan_id", "expected_version", "groups"})
             plan_id = body.get("plan_id")
             if not isinstance(plan_id, str) or not ID_PATTERN.fullmatch(plan_id):
                 raise BodyError("plan_id", "plan_id must be a plan identifier")
             expected = _int_field(body, "expected_version", required=True, low=1, high=MAX_REVISION)
-            return jsonify(service().add_week(trip_id, plan_id, expected))
+            return jsonify(service().add_week(trip_id, plan_id, expected, groups_field(body)))
 
         return mapped(run)
 
@@ -220,9 +240,17 @@ def register_trip_routes(app: Any, error: Callable[..., Any]) -> None:
         denied = guard() or check_id("trip_id", trip_id) or check_id("plan_id", plan_id)
         if denied:
             return denied
-        return mapped(
-            lambda: jsonify(service().remove_week(trip_id, plan_id, expected_version_query()))
-        )
+
+        def run():
+            values = request.args.getlist("group")
+            if len(values) > 1 or (values and values[0] not in trips.GROUPS):
+                raise BodyError("group", f"group must be one of {', '.join(trips.GROUPS)}")
+            expected = expected_version_query()
+            return jsonify(
+                service().remove_week(trip_id, plan_id, expected, values[0] if values else None)
+            )
+
+        return mapped(run)
 
     def version_action(name: str):
         def run_action(trip_id: str):

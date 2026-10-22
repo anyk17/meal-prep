@@ -465,7 +465,7 @@ def test_migration_5_applies_to_a_version_4_database(tmp_path) -> None:
             for statement in statements:
                 conn.execute(statement)
             conn.execute("INSERT INTO schema_version VALUES (?, ?, 'x')", (version, name))
-    assert migrations.migrate(conn) == [5]
+    assert migrations.migrate(conn) == [5, 6]
     conn.close()
     with sqlite3.connect(path) as check:
         assert {"users", "sessions"} <= {r[0] for r in check.execute("SELECT name FROM sqlite_master")}

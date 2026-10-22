@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPlanEditor } from '../src/editing/planEditor.js';
-import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, canSwapSlot, groupGroceryDelta, formatDifference, tripImpactMessage, replacedSwapsWarning, swapErrorMessage, swapNeedsReload } from '../src/editing/swapModel.js';
+import { filterVariants, proteinOptions, groupRecipes, defaultVariant, carbLabel, canSwapSlot, groupGroceryDelta, formatDifference, tripImpactMessage, tripImpactMessages, replacedSwapsWarning, swapErrorMessage, swapNeedsReload } from '../src/editing/swapModel.js';
 
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 function mockFetch(handler) {
@@ -115,6 +115,22 @@ test('trip impact messages', () => {
   assert.equal(tripImpactMessage({ name: 'Semana 1', status: 'open', extra_needed: [] }).text, "Shopping list 'Semana 1' will update automatically.");
   const done = tripImpactMessage({ name: 'Semana 1', status: 'done', extra_needed: [{ ingredient_id: 'a', display: 'Arroz', unit: 'g', quantity: 70 }, { ingredient_id: 'b', display: 'Limón', unit: 'units', quantity: 2 }] });
   assert.equal(done.text, "'Semana 1' is already done — you'll need: Arroz 70 g, Limón 2 units.");
+});
+
+test('trip impact lists every list and names the group when a list holds only one', () => {
+  assert.deepEqual(tripImpactMessages(null), []);
+  assert.deepEqual(tripImpactMessages(undefined), []);
+  assert.equal(tripImpactMessages({ name: 'A', status: 'open', extra_needed: [] })[0].text, "Shopping list 'A' will update automatically.");
+  const texts = tripImpactMessages([
+    { trip_id: 'a', name: 'Month', status: 'done', groups: ['long_lasting'], extra_needed: [{ display: 'Arroz', unit: 'g', quantity: 70 }] },
+    { trip_id: 'b', name: 'Mid-month', status: 'open', groups: ['fresh'], extra_needed: [] },
+    { trip_id: 'c', name: 'Both', status: 'open', groups: ['long_lasting', 'fresh'], extra_needed: [] },
+  ]).map(m => m.text);
+  assert.deepEqual(texts, [
+    "'Month' (Long-lasting) is already done — you'll need: Arroz 70 g.",
+    "Shopping list 'Mid-month' (Fresh) will update automatically.",
+    "Shopping list 'Both' will update automatically.",
+  ]);
 });
 
 test('replaced_swaps produces the regenerate warning', () => {

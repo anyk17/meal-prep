@@ -323,11 +323,12 @@ class SqlitePlanRepository:
 
 def _insert_trip_weeks(conn: sqlite3.Connection, trip: ShoppingTrip) -> None:
     conn.executemany(
-        "INSERT INTO shopping_trip_weeks (trip_id, plan_id, covered_revision,"
-        " covered_snapshot_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO shopping_trip_weeks (trip_id, plan_id, shelf_group, covered_revision,"
+        " covered_snapshot_id) VALUES (?, ?, ?, ?, ?)",
         [
-            (trip.trip_id, w.plan_id, w.covered_revision, w.covered_snapshot_id)
+            (trip.trip_id, w.plan_id, group, w.covered_revision, w.covered_snapshot_id)
             for w in trip.weeks
+            for group in w.groups
         ],
     )
 
@@ -335,12 +336,15 @@ def _insert_trip_weeks(conn: sqlite3.Connection, trip: ShoppingTrip) -> None:
 def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> list[ShoppingTrip]:
     trips = []
     for row in rows:
-        weeks = conn.execute(
-            "SELECT w.plan_id, p.week_start, w.covered_revision, w.covered_snapshot_id"
+        members = conn.execute(
+            "SELECT w.plan_id, p.week_start, w.shelf_group, w.covered_revision, w.covered_snapshot_id"
             " FROM shopping_trip_weeks w JOIN plans p ON p.plan_id = w.plan_id"
             " WHERE w.trip_id = ? ORDER BY p.week_start, w.plan_id",
             (row["trip_id"],),
         ).fetchall()
+        by_plan: dict[str, list[sqlite3.Row]] = {}
+        for m in members:
+            by_plan.setdefault(m["plan_id"], []).append(m)
         trips.append(
             ShoppingTrip(
                 trip_id=row["trip_id"],
@@ -354,12 +358,13 @@ def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> l
                 ),
                 weeks=tuple(
                     TripWeek(
-                        w["plan_id"],
-                        date.fromisoformat(w["week_start"]),
-                        w["covered_revision"],
-                        w["covered_snapshot_id"],
+                        plan_id,
+                        date.fromisoformat(group_rows[0]["week_start"]),
+                        group_rows[0]["covered_revision"],
+                        group_rows[0]["covered_snapshot_id"],
+                        tuple(g["shelf_group"] for g in group_rows),
                     )
-                    for w in weeks
+                    for plan_id, group_rows in by_plan.items()
                 ),
             )
         )
@@ -369,8 +374,8 @@ def _trips_from_rows(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> l
 class SqliteShoppingTripRepository:
     """ShoppingTripRepository backed by SQLite (migrated on construction).
 
-    UNIQUE(plan_id) on shopping_trip_weeks enforces one trip per week; foreign keys
-    tie weeks to plans (and covered revisions to immutable plan_revisions rows).
+    UNIQUE(plan_id, shelf_group) on shopping_trip_weeks enforces one trip per (week, group);
+    foreign keys tie weeks to plans (and covered revisions to immutable plan_revisions rows).
     """
 
     def __init__(self, db_path: Path | str) -> None:
@@ -385,12 +390,14 @@ class SqliteShoppingTripRepository:
         if "UNIQUE" in text and "shopping_trip_weeks" in text:
             with self._conn() as conn:
                 for week in trip.weeks:
-                    row = conn.execute(
-                        "SELECT trip_id FROM shopping_trip_weeks WHERE plan_id = ?",
-                        (week.plan_id,),
-                    ).fetchone()
-                    if row is not None and row["trip_id"] != trip.trip_id:
-                        return WeekAlreadyOnTrip(week.plan_id, row["trip_id"])
+                    for group in week.groups:
+                        row = conn.execute(
+                            "SELECT trip_id FROM shopping_trip_weeks"
+                            " WHERE plan_id = ? AND shelf_group = ?",
+                            (week.plan_id, group),
+                        ).fetchone()
+                        if row is not None and row["trip_id"] != trip.trip_id:
+                            return WeekAlreadyOnTrip(week.plan_id, row["trip_id"], group)
             return WeekAlreadyOnTrip(trip.weeks[0].plan_id)
         if "FOREIGN KEY" in text:
             return PlanNotFound("a plan on the trip does not exist")
@@ -546,6 +553,13 @@ class SqlitePlannerInputReader:
             rules=Rules.model_validate_json(rules["content"]),
             pantry=tuple(r["ingredient_id"] for r in pantry),
         )
+
+
+    def shelf_lives(self) -> dict[str, str]:
+        """ingredient_id -> shelf life, from the stored ingredients only (cheap; no recipe parsing)."""
+        with closing(open_database(self.db_path, create=False)) as conn:
+            rows = conn.execute("SELECT ingredient_id, content FROM ingredients").fetchall()
+        return {r["ingredient_id"]: json.loads(r["content"])["shelf_life"] for r in rows}
 
 
 # ---------------------------------------------------------------- input writes

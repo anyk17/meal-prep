@@ -74,7 +74,7 @@ def test_preview_returns_changes_delta_warnings_and_stores_nothing(client, plan)
     assert preview["plan_id"] == FUTURE_ID and preview["base_revision"] == 1
     assert {c["assignment_id"] for c in preview["changes"]} == {lunch["assignment_id"], lunch["linked_assignment_id"]}
     assert all(c["kind"] == "changed" and c["after"]["variant_id"] == variant for c in preview["changes"])
-    assert preview["grocery_delta"] and preview["trip"] is None
+    assert preview["grocery_delta"] and preview["trips"] == []
     assert all(r["difference"] != 0 for r in preview["grocery_delta"])
     revisions = ok(client.get(f"/api/v1/plans/{FUTURE_ID}/revisions"), 200, "RevisionList")["items"]
     assert [r["revision"] for r in revisions] == [1]
@@ -181,10 +181,10 @@ def test_preview_reports_done_trip_extra_needed(client, plan) -> None:
     lunch = linked_lunch(plan)
     variant = other_variant(client, lunch)
     trip = ok(client.post("/api/v1/shopping-trips", json={"plan_ids": [FUTURE_ID]}), 201, "ShoppingTrip")
-    open_trip = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trip"]
+    (open_trip,) = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trips"]
     assert open_trip["status"] == "open" and open_trip["extra_needed"] == []
     ok(client.post(f"/api/v1/shopping-trips/{trip['trip_id']}/done", json={"expected_version": 1}), 200, "ShoppingTrip")
-    done = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trip"]
+    (done,) = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trips"]
     assert done["status"] == "done" and done["trip_id"] == trip["trip_id"] and done["extra_needed"]
     assert all(r["quantity"] > 0 for r in done["extra_needed"])
 
@@ -201,3 +201,18 @@ def test_proposal_reports_replaced_swaps_and_undo_of_a_swap_is_allowed(client, p
     undo = ok(client.post(f"/api/v1/plans/{FUTURE_ID}/undo", json={"expected_revision": 2}, headers={"Idempotency-Key": "u1"}), 200, "MutationResult")
     assert undo["revision"] == 3 and undo["changed"] is True
     assert ok(client.get(f"/api/v1/plans/{FUTURE_ID}"), 200, "Plan")["slots"] == plan["slots"]
+
+
+def test_preview_lists_each_trip_with_its_groups_and_limits_extra_needed(client, plan) -> None:
+    lunch = linked_lunch(plan)
+    variant = other_variant(client, lunch)
+    ll = ok(client.post("/api/v1/shopping-trips", json={"plan_ids": [FUTURE_ID], "groups": ["long_lasting"]}), 201, "ShoppingTrip")
+    fresh = ok(client.post("/api/v1/shopping-trips", json={"plan_ids": [FUTURE_ID], "groups": ["fresh"]}), 201, "ShoppingTrip")
+    for t in (ll, fresh):
+        ok(client.post(f"/api/v1/shopping-trips/{t['trip_id']}/done", json={"expected_version": 1}), 200, "ShoppingTrip")
+    trips = ok(client.post(PREVIEW, json=body(lunch, variant)), 200, "SwapPreview")["trips"]
+    assert {t["trip_id"]: t["groups"] for t in trips} == {ll["trip_id"]: ["long_lasting"], fresh["trip_id"]: ["fresh"]}
+    extra = {t["trip_id"]: {r["ingredient_id"] for r in t["extra_needed"]} for t in trips}
+    labels = {i["ingredient_id"]: i["shelf_life"] for t in (ll, fresh) for i in t["items"]}
+    assert all(labels.get(i, "long_lasting") == "long_lasting" for i in extra[ll["trip_id"]])
+    assert all(labels.get(i, "fresh") == "fresh" for i in extra[fresh["trip_id"]])

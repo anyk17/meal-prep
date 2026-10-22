@@ -1,4 +1,5 @@
 // Pure helpers for the swap dialog (no React, no network) so they can be unit tested.
+import { groupLabel, swapImpactEntries } from '../tripModel.js';
 
 export function normalizeText(value) {
   return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -80,17 +81,25 @@ export function groupGroceryDelta(delta) {
     .map(([section, items]) => ({ section, items: items.sort((a, b) => a.display.localeCompare(b.display)) }));
 }
 
+const groupSuffix = groups => (groups?.length === 1 ? ` (${groupLabel(groups[0])})` : '');
+// One list's impact. `groups` (optional) names the long-lasting/fresh part of the list the swapped week is on.
 export function tripImpactMessage(trip) {
   if (!trip) return null;
-  if (trip.status === 'open') return { kind: 'open', text: `Shopping list '${trip.name}' will update automatically.` };
+  const where = groupSuffix(trip.groups);
+  if (trip.status === 'open') return { kind: 'open', text: `Shopping list '${trip.name}'${where} will update automatically.` };
   const extras = (trip.extra_needed ?? []).map(item => `${item.display} ${formatAmount(item.quantity, item.unit)}`);
   return {
     kind: 'done',
     text: extras.length
-      ? `'${trip.name}' is already done — you'll need: ${extras.join(', ')}.`
-      : `'${trip.name}' is already done — you won't need anything extra.`,
+      ? `'${trip.name}'${where} is already done — you'll need: ${extras.join(', ')}.`
+      : `'${trip.name}'${where} is already done — you won't need anything extra.`,
     extras,
   };
+}
+
+// Messages for every list the week is on (one per list; a list holding both groups is one message).
+export function tripImpactMessages(impact) {
+  return swapImpactEntries(impact).map(entry => tripImpactMessage(entry));
 }
 
 export function replacedSwapsWarning(proposal) {

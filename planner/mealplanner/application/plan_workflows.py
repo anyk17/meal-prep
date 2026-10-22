@@ -353,7 +353,7 @@ class PlanWorkflowService:
                 grocery_delta(current.snapshot.shopping_list, candidate.shopping_list)
             ),
             rule_warnings=self._rule_warnings(candidate, inputs),
-            trip=self._trip_impact(plan_id, candidate),
+            trips=self._trip_impact(plan_id, candidate, inputs),
         )
 
     def swap(
@@ -423,29 +423,39 @@ class PlanWorkflowService:
             {"rule": v.rule, "message": v.message} for v in check_weekly_rules(snapshot, inputs)
         )
 
-    def _trip_impact(self, plan_id: str, swapped: PlanSnapshot) -> JsonObject | None:
-        """The shopping trip holding the week; a done trip also lists what is newly needed."""
+    def _trip_impact(
+        self, plan_id: str, swapped: PlanSnapshot, inputs: PlannerInputs
+    ) -> tuple[JsonObject, ...]:
+        """Every shopping list holding the week, with the groups it covers; a done list also
+        lists what is newly needed, limited to the ingredients of its groups."""
         if self._trips is None:
-            return None
-        trip = next((t for t in self._trips.list() if plan_id in t.plan_ids), None)
-        if trip is None:
-            return None
-        extra: list[JsonObject] = []
-        if trip.status == DONE:
-            week = next(w for w in trip.weeks if w.plan_id == plan_id)
-            covered = (
-                self._repo.get_revision(plan_id, week.covered_revision)
-                if week.covered_revision is not None
-                else None
+            return ()
+        labels = inputs.shelf_lives()
+        impact: list[JsonObject] = []
+        for trip in self._trips.list():
+            week = next((w for w in trip.weeks if w.plan_id == plan_id), None)
+            if week is None:
+                continue
+            extra: list[JsonObject] = []
+            if trip.status == DONE and week.covered_revision is not None:
+                covered = self._repo.get_revision(plan_id, week.covered_revision)
+                if covered is not None:
+                    extra = extra_needed(
+                        covered.snapshot.shopping_list,
+                        swapped.shopping_list,
+                        lambda ingredient_id, groups=week.groups: labels.get(ingredient_id) in groups
+                        or ingredient_id not in labels,
+                    )
+            impact.append(
+                {
+                    "trip_id": trip.trip_id,
+                    "name": trip.display_name,
+                    "status": trip.status,
+                    "groups": list(week.groups),
+                    "extra_needed": extra,
+                }
             )
-            if covered is not None:
-                extra = extra_needed(covered.snapshot.shopping_list, swapped.shopping_list)
-        return {
-            "trip_id": trip.trip_id,
-            "name": trip.display_name,
-            "status": trip.status,
-            "extra_needed": extra,
-        }
+        return tuple(impact)
 
     # ------------------------------------------------------------ internals
 

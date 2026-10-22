@@ -10,7 +10,7 @@ decides who may swap which slot and when.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -61,7 +61,7 @@ class SwapPreview:
     changes: tuple[SlotChange, ...]
     grocery_delta: tuple[JsonObject, ...]
     rule_warnings: tuple[JsonObject, ...]
-    trip: JsonObject | None
+    trips: tuple[JsonObject, ...]  # every list the week is on (see PlanWorkflowService)
 
 
 @dataclass(frozen=True)
@@ -270,11 +270,20 @@ def grocery_delta(before: JsonObject, after: JsonObject) -> list[JsonObject]:
     return rows
 
 
-def extra_needed(covered: JsonObject, current: JsonObject) -> list[JsonObject]:
-    """Quantities `current` needs beyond `covered` (positive differences only)."""
+def extra_needed(
+    covered: JsonObject,
+    current: JsonObject,
+    only: Callable[[str], bool] | None = None,
+) -> list[JsonObject]:
+    """Quantities `current` needs beyond `covered` (positive differences only).
+
+    only, when given, keeps just the ingredient ids it accepts (e.g. one list's groups).
+    """
     old, new = _quantities(covered), _quantities(current)
     rows = []
     for key, row in new.items():
+        if only is not None and not only(key[0]):
+            continue
         extra = round(row["quantity"] - (old[key]["quantity"] if key in old else 0), 2)
         if extra > 0:
             rows.append(

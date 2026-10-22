@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { cn } from '../lib/utils';
-import { COVERAGE_LABEL } from '../tripModel.js';
+import { COVERAGE_LABEL, SHELF_LIVES, coverageSummary, decorateCoverage, groupLabel } from '../tripModel.js';
 
 const STYLE = {
   not_covered: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -8,18 +8,27 @@ const STYLE = {
   covered: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 
-// coverage is a WeekCoverage entry (optionally decorated with trip_name); null while unknown, so nothing is claimed.
-export function CoverageBadge({ coverage, onOpenTrip }) {
-  if (!coverage) return null;
-  const label = COVERAGE_LABEL[coverage.coverage];
-  const base = cn('inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full', STYLE[coverage.coverage]);
-  const title = coverage.trip_name ? `${label}: ${coverage.trip_name}` : label;
+// A decorated WeekCoverage entry ({ groups: { long_lasting: { coverage, trip_id, changed_since_shopping, trip_name }, fresh: {...} } });
+// null while unknown, so nothing is claimed. Two compact pills, one per shelf-life group.
+function GroupPill({ group, entry, onOpenTrip }) {
+  const label = `${groupLabel(group)}: ${COVERAGE_LABEL[entry.coverage].toLowerCase()}`;
+  const base = cn('inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full', STYLE[entry.coverage]);
+  const title = entry.trip_name ? `${label} (${entry.trip_name})` : label;
   return (
-    <span className="inline-flex flex-wrap items-center gap-1" data-coverage={coverage.coverage}>
-      {coverage.trip_id && onOpenTrip ? (
-        <button type="button" onClick={() => onOpenTrip(coverage.trip_id)} title={`Open ${title}`} className={cn(base, 'hover:underline min-h-6')}>{label}</button>
+    <span className="inline-flex flex-wrap items-center gap-1" data-group={group} data-coverage={entry.coverage}>
+      {entry.trip_id && onOpenTrip ? (
+        <button type="button" onClick={() => onOpenTrip(entry.trip_id)} title={`Open ${title}`} className={cn(base, 'hover:underline min-h-6')}>{label}</button>
       ) : <span className={base} title={title}>{label}</span>}
-      {coverage.changed_since_shopping && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" title="The plan was edited after this list was marked done">changed since shopping</span>}
+      {entry.changed_since_shopping && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" title="The plan was edited after this list was marked done">{groupLabel(group)} changed since shopping</span>}
+    </span>
+  );
+}
+
+export function CoverageBadge({ coverage, onOpenTrip }) {
+  if (!coverage?.groups) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" aria-label={coverageSummary(coverage)}>
+      {SHELF_LIVES.map(group => <GroupPill key={group} group={group} entry={coverage.groups[group]} onOpenTrip={onOpenTrip} />)}
     </span>
   );
 }
@@ -34,8 +43,7 @@ export function WeekCoverage({ reader, plan, nonce, onOpenTrip }) {
       .then(([coverage, trips]) => {
         if (!live) return;
         const entry = coverage.items.find(item => item.plan_id === plan.plan_id) ?? null;
-        const name = entry && trips?.items.find(trip => trip.trip_id === entry.trip_id)?.name;
-        setState({ key, coverage: entry && { ...entry, trip_name: name ?? null } });
+        setState({ key, coverage: decorateCoverage(entry, trips?.items) });
       })
       .catch(() => { if (live) setState({ key, coverage: null }); });
     return () => { live = false; };

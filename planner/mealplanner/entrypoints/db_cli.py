@@ -263,7 +263,10 @@ def export_publication(
     plans = SqlitePlanRepository(db_path)
     service = PublicationService(
         reader,
-        ShoppingTripService(SqliteShoppingTripRepository(db_path), plans, clock),
+        ShoppingTripService(
+            SqliteShoppingTripRepository(db_path), plans, clock,
+            SqlitePlannerInputReader(db_path).shelf_lives,
+        ),  # fmt: skip
         clock,
         timezone_name,
         FilePublicationWriter(out_dir, validate),

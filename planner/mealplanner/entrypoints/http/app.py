@@ -110,7 +110,11 @@ def _build_workflow_service(
 def _build_trip_service(
     db_path: Path | str, timezone: str | None, clock: Callable[[], datetime] | None
 ) -> Any:
-    from ...adapters.sqlite.store import SqlitePlanRepository, SqliteShoppingTripRepository
+    from ...adapters.sqlite.store import (
+        SqlitePlannerInputReader,
+        SqlitePlanRepository,
+        SqliteShoppingTripRepository,
+    )
     from ...application.shopping_trips import ShoppingTripService
 
     tz = ZoneInfo(timezone or os.environ.get("MEALPLANNER_TIMEZONE", "America/Bogota"))
@@ -118,6 +122,7 @@ def _build_trip_service(
         SqliteShoppingTripRepository(db_path),
         SqlitePlanRepository(db_path),
         clock or (lambda: datetime.now(tz)),
+        SqlitePlannerInputReader(db_path).shelf_lives,
     )
 
 

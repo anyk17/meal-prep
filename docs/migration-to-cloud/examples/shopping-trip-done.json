@@ -15,7 +15,11 @@
       "snapshot_id": "sha256:dc9d775df57fb9e8732a19a732587265639005a8ed19fbd40d6392d66d51fb80",
       "current_revision": 2,
       "coverage": "covered",
-      "changed_since_shopping": true
+      "changed_since_shopping": true,
+      "groups": [
+        "long_lasting",
+        "fresh"
+      ]
     }
   ],
   "items": [
@@ -25,6 +29,7 @@
       "quantity": 720.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -35,6 +40,7 @@
       "quantity": 330.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -45,6 +51,7 @@
       "quantity": 100.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -55,6 +62,7 @@
       "quantity": 280.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -65,6 +73,7 @@
       "quantity": 380.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -75,6 +84,7 @@
       "quantity": 100.0,
       "unit": "g",
       "section": "protein",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -85,6 +95,7 @@
       "quantity": 200.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -95,6 +106,7 @@
       "quantity": 160.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -105,6 +117,7 @@
       "quantity": 320.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -115,6 +128,7 @@
       "quantity": 370.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -125,6 +139,7 @@
       "quantity": 370.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -135,6 +150,7 @@
       "quantity": 30.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -145,6 +161,7 @@
       "quantity": 170.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -155,6 +172,7 @@
       "quantity": 400.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -165,6 +183,7 @@
       "quantity": 300.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -175,6 +194,7 @@
       "quantity": 50.0,
       "unit": "g",
       "section": "vegetable",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -185,6 +205,7 @@
       "quantity": 60.0,
       "unit": "g",
       "section": "condiment",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -195,6 +216,7 @@
       "quantity": 50.0,
       "unit": "ml",
       "section": "condiment",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -205,6 +227,7 @@
       "quantity": 5.0,
       "unit": "g",
       "section": "condiment",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -215,6 +238,7 @@
       "quantity": 100.0,
       "unit": "g",
       "section": "dairy",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -225,6 +249,7 @@
       "quantity": 70.0,
       "unit": "g",
       "section": "carb",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -235,6 +260,7 @@
       "quantity": 55.0,
       "unit": "g",
       "section": "carb",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -245,6 +271,7 @@
       "quantity": 80.0,
       "unit": "g",
       "section": "carb",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -255,6 +282,7 @@
       "quantity": 100.0,
       "unit": "g",
       "section": "carb",
+      "shelf_life": "fresh",
       "plan_ids": [
         "plan_2026_10_19"
       ]
@@ -265,6 +293,7 @@
       "quantity": 15.0,
       "unit": "g",
       "section": "fat",
+      "shelf_life": "long_lasting",
       "plan_ids": [
         "plan_2026_10_19"
       ]

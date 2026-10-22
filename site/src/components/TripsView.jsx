@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { ArrowLeft, Check, ShoppingCart } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatWeekRange } from '../dates.js';
-import { countChecked, formatQuantity, groupItems, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../tripModel.js';
+import { countChecked, formatQuantity, weekGroupsLabel, groupItemsByShelfLife, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../tripModel.js';
 
 const card = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800';
 const shortDate = value => new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${value}T00:00:00Z`));
@@ -53,7 +53,7 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
   });
   const toggle = item => update(current => { const next = { ...current }; const key = itemCheckKey(item); if (next[key]) delete next[key]; else next[key] = true; return next; });
   const checked = countChecked(trip.items, checks);
-  const sections = groupItems(trip.items, checks);
+  const shelfGroups = groupItemsByShelfLife(trip.items, checks);
 
   return (
     <div className="space-y-4">
@@ -70,6 +70,7 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
             <li key={week.plan_id} className="text-xs rounded-lg bg-slate-100 dark:bg-slate-800 px-2 py-1">
               <button type="button" className="hover:underline text-left" onClick={() => onOpenWeek(week.week_start)}>{formatWeekRange(week.week_start)}</button>
               <span className="font-mono text-slate-500 dark:text-slate-400"> r{week.revision}</span>
+              <span className="text-slate-600 dark:text-slate-300" data-testid="week-groups"> · {weekGroupsLabel(week.groups)}</span>
               {week.changed_since_shopping && <span className="text-amber-700 dark:text-amber-300"> · changed since shopping (now r{week.current_revision})</span>}
             </li>
           ))}
@@ -82,27 +83,32 @@ function TripDetail({ trip, mode, exportedAt, onBack, onOpenWeek, controls }) {
         <span className="text-sm font-semibold px-3 py-1 rounded-full bg-slate-900 text-white dark:bg-slate-700" aria-live="polite">{checked} of {trip.items.length}</span>
       </div>
 
-      {sections.map(group => (
-        <section key={group.section} aria-label={group.section} className={cn(card, 'overflow-hidden')}>
-          <h3 className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex justify-between"><span>{group.section}</span><span className="font-mono normal-case">{group.checked}/{group.total}</span></h3>
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {group.items.map(item => {
-              const on = !!checks[itemCheckKey(item)];
-              return (
-                <li key={itemCheckKey(item)}>
-                  <button type="button" role="checkbox" aria-checked={on} onClick={() => toggle(item)}
-                    className={cn('w-full min-h-14 px-4 py-3 flex items-center gap-4 text-left select-none transition-opacity', on && 'opacity-50 bg-slate-50 dark:bg-slate-900/60')}>
-                    <span className={cn('w-7 h-7 rounded-md border-2 flex items-center justify-center shrink-0', on ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 dark:border-slate-600')}>{on && <Check size={18} strokeWidth={3} />}</span>
-                    <span className="flex-1 min-w-0">
-                      <span className={cn('block text-base font-medium text-slate-900 dark:text-slate-100', on && 'line-through')}>{item.display}</span>
-                    </span>
-                    <span className="font-mono text-sm text-slate-700 dark:text-slate-200 shrink-0">{formatQuantity(item.quantity, item.unit)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      {shelfGroups.map(shelfGroup => (
+        <div key={shelfGroup.group} role="group" aria-label={shelfGroup.label} data-group={shelfGroup.group} className="space-y-3">
+          <h3 className="flex items-baseline justify-between gap-2 px-1 pt-2 text-lg font-bold text-slate-900 dark:text-white"><span>{shelfGroup.label}</span><span className="text-sm font-mono font-semibold text-slate-500 dark:text-slate-400">{shelfGroup.checked}/{shelfGroup.total}</span></h3>
+          {shelfGroup.sections.map(group => (
+            <section key={group.section} aria-label={`${shelfGroup.label}: ${group.section}`} className={cn(card, 'overflow-hidden')}>
+              <h4 className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex justify-between"><span>{group.section}</span><span className="font-mono normal-case">{group.checked}/{group.total}</span></h4>
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {group.items.map(item => {
+                  const on = !!checks[itemCheckKey(item)];
+                  return (
+                    <li key={itemCheckKey(item)}>
+                      <button type="button" role="checkbox" aria-checked={on} onClick={() => toggle(item)}
+                        className={cn('w-full min-h-14 px-4 py-3 flex items-center gap-4 text-left select-none transition-opacity', on && 'opacity-50 bg-slate-50 dark:bg-slate-900/60')}>
+                        <span className={cn('w-7 h-7 rounded-md border-2 flex items-center justify-center shrink-0', on ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 dark:border-slate-600')}>{on && <Check size={18} strokeWidth={3} />}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className={cn('block text-base font-medium text-slate-900 dark:text-slate-100', on && 'line-through')}>{item.display}</span>
+                        </span>
+                        <span className="font-mono text-sm text-slate-700 dark:text-slate-200 shrink-0">{formatQuantity(item.quantity, item.unit)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       ))}
     </div>
   );

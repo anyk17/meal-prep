@@ -551,35 +551,41 @@
       "rule": "consecutive_lunch_same_carb"
     }
   ],
-  "trip": {
-    "extra_needed": [
-      {
-        "display": "Arroz",
-        "ingredient_id": "rice",
-        "quantity": 80.0,
-        "unit": "g"
-      },
-      {
-        "display": "Miel",
-        "ingredient_id": "honey",
-        "quantity": 30.0,
-        "unit": "ml"
-      },
-      {
-        "display": "Pollo",
-        "ingredient_id": "chicken",
-        "quantity": 360.0,
-        "unit": "g"
-      },
-      {
-        "display": "Zucchini",
-        "ingredient_id": "zucchini",
-        "quantity": 200.0,
-        "unit": "g"
-      }
-    ],
-    "name": "Oct 19 - Oct 25",
-    "status": "done",
-    "trip_id": "trip_8a1d4c7e2b6f4093b5e1d0a9c8f7e6b5"
-  }
+  "trips": [
+    {
+      "extra_needed": [
+        {
+          "display": "Arroz",
+          "ingredient_id": "rice",
+          "quantity": 80.0,
+          "unit": "g"
+        },
+        {
+          "display": "Miel",
+          "ingredient_id": "honey",
+          "quantity": 30.0,
+          "unit": "ml"
+        },
+        {
+          "display": "Pollo",
+          "ingredient_id": "chicken",
+          "quantity": 360.0,
+          "unit": "g"
+        },
+        {
+          "display": "Zucchini",
+          "ingredient_id": "zucchini",
+          "quantity": 200.0,
+          "unit": "g"
+        }
+      ],
+      "groups": [
+        "long_lasting",
+        "fresh"
+      ],
+      "name": "Oct 19 - Oct 25",
+      "status": "done",
+      "trip_id": "trip_8a1d4c7e2b6f4093b5e1d0a9c8f7e6b5"
+    }
+  ]
 }

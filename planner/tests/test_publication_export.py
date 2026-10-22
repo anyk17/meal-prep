@@ -18,6 +18,7 @@ from mealplanner.adapters.ortools import OrToolsPlanGenerator
 from mealplanner.adapters.publication_files import FilePublicationWriter
 from mealplanner.adapters.sqlite.migrations import LATEST_VERSION, connect, current_version
 from mealplanner.adapters.sqlite.store import (
+    SqlitePlannerInputReader,
     SqlitePlanReadAdapter,
     SqlitePlanRepository,
     SqliteShoppingTripRepository,
@@ -58,12 +59,12 @@ class Env:
         import_inputs(self.db, ROOT / "data")
         self.plans = SqlitePlanRepository(self.db)
         self.trip_repo = SqliteShoppingTripRepository(self.db)
-        from mealplanner.adapters.sqlite.store import SqlitePlannerInputReader
-
         self.workflow = PlanWorkflowService(
             self.plans, SqlitePlannerInputReader(self.db), lambda: NOW, generator=CachedGenerator()
         )
-        self.trips = ShoppingTripService(self.trip_repo, self.plans, lambda: NOW)
+        self.trips = ShoppingTripService(
+            self.trip_repo, self.plans, lambda: NOW, SqlitePlannerInputReader(self.db).shelf_lives
+        )
         self.out = tmp_path / "out"
         self._counter = itertools.count(1)
 
@@ -187,7 +188,10 @@ def test_trip_inclusion_and_skip(env: Env, full_validator) -> None:
     assert trip == env.trips.get(a)
     assert trip["status"] == "open"
     shopping = [read_json(base / f"plans/{p}/shopping-list.json") for p in (P_OCT26, P_NOV02)]
-    assert trip["items"] == trips.sum_items(list(zip((P_OCT26, P_NOV02), shopping)))
+    assert trip["items"] == trips.sum_items(
+        [(p, sl, trips.GROUPS) for p, sl in zip((P_OCT26, P_NOV02), shopping)],
+        SqlitePlannerInputReader(env.db).shelf_lives(),
+    )
 
     both = env.service(full_validator)
     env.out = env.out.parent / "out_all"

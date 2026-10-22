@@ -8,7 +8,7 @@ import { createStaticReader } from '../src/readers/static.js';
 import { deriveCoverage, validateTrip } from '../src/readers/shared.js';
 import { createPlanEditor } from '../src/editing/planEditor.js';
 import { runTripAction } from '../src/editing/tripActions.js';
-import { countChecked, groupItems, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../src/tripModel.js';
+import { GROUP_LABEL, countChecked, coverageSummary, createTripBody, addWeekBody, groupItems, groupItemsByShelfLife, groupsForChoice, removeWeekPath, swapImpactEntries, weekAvailability, weekGroupsLabel, weekSelectable, itemCheckKey, readTripChecks, sortTrips, tripStorageKey, writeTripChecks } from '../src/tripModel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const examples = path.resolve(here, '../../docs/migration-to-cloud/examples');
@@ -31,10 +31,10 @@ const [first, second] = baseManifest.plans.map(entry => entry.summary);
 function tripFor(id, summaries, overrides = {}) {
   return {
     trip_id: id, name: `List ${id}`, status: 'open', version: 2, created_at: '2026-10-21T10:00:00-05:00', updated_at: '2026-10-21T10:05:00-05:00', completed_at: null,
-    weeks: summaries.map(s => ({ plan_id: s.plan_id, week_start: s.week_start, week_end: s.week_end, revision: s.revision, snapshot_id: s.snapshot_id, current_revision: s.revision, coverage: 'on_list', changed_since_shopping: false })),
+    weeks: summaries.map(s => ({ plan_id: s.plan_id, week_start: s.week_start, week_end: s.week_end, revision: s.revision, snapshot_id: s.snapshot_id, current_revision: s.revision, groups: ['long_lasting', 'fresh'], coverage: 'on_list', changed_since_shopping: false })),
     items: [
-      { ingredient_id: 'chicken', display: 'Pollo', quantity: 1080, unit: 'g', section: 'protein', plan_ids: summaries.map(s => s.plan_id) },
-      { ingredient_id: 'milk', display: 'Leche', quantity: 2, unit: 'units', section: 'dairy', plan_ids: [summaries[0].plan_id] },
+      { ingredient_id: 'chicken', display: 'Pollo', quantity: 1080, unit: 'g', section: 'protein', shelf_life: 'long_lasting', plan_ids: summaries.map(s => s.plan_id) },
+      { ingredient_id: 'milk', display: 'Leche', quantity: 2, unit: 'units', section: 'dairy', shelf_life: 'fresh', plan_ids: [summaries[0].plan_id] },
     ],
     ...overrides,
   };
@@ -81,6 +81,13 @@ test('validateTrip rejects broken coverage, flags, weeks and items', () => {
     t => { t.extra = 1; },
     t => { t.name = ''; },
     t => { t.weeks[0].current_revision = 5; }, // open trip must use the current revision
+    t => { delete t.weeks[0].groups; },
+    t => { t.weeks[0].groups = []; },
+    t => { t.weeks[0].groups = ['fresh', 'long_lasting']; },
+    t => { t.weeks[0].groups = ['fresh', 'fresh']; },
+    t => { t.weeks[0].groups = ['frozen']; },
+    t => { delete t.items[0].shelf_life; },
+    t => { t.items[0].shelf_life = 'frozen'; },
   ];
   for (const mutate of mutations) { const trip = clone(base); mutate(trip); assert.throws(() => validateTrip(trip), error => error.code === 'source_invalid'); }
 });
@@ -102,9 +109,17 @@ test('API reader lists, gets and validates trips and maps trip_not_found', async
   } finally { globalThis.fetch = original; }
 });
 
-test('API reader coverage reads /coverage for the range and validates it', async () => {
+const gc = (coverage = 'not_covered', trip_id = null, changed = false) => ({ coverage, trip_id, changed_since_shopping: changed });
+const coverageItem = (planId, weekStart, weekEnd, long, fresh) => ({ plan_id: planId, week_start: weekStart, week_end: weekEnd, groups: { long_lasting: long, fresh } });
+const coverageFixture = () => ({ items: [
+  coverageItem('plan_2026_10_19', '2026-10-19', '2026-10-25', gc('covered', 'trip_a', true), gc('covered', 'trip_a')),
+  coverageItem('plan_2026_10_26', '2026-10-26', '2026-11-01', gc('on_list', 'trip_b'), gc()),
+  coverageItem('plan_2026_11_02', '2026-11-02', '2026-11-08', gc(), gc()),
+] });
+
+test('API reader coverage reads /coverage for the range and validates the per-group shape', async () => {
   const original = globalThis.fetch;
-  const coverage = example('coverage.json');
+  const coverage = coverageFixture();
   const calls = [];
   try {
     globalThis.fetch = async input => { calls.push(new URL(input)); return json(coverage); };
@@ -112,11 +127,22 @@ test('API reader coverage reads /coverage for the range and validates it', async
     const result = await reader.getCoverage({ from: '2026-10-01', to: '2026-11-30' });
     assert.equal(calls[0].pathname, '/api/v1/coverage');
     assert.equal(calls[0].searchParams.get('from'), '2026-10-01');
-    assert.deepEqual(result.items.map(i => i.coverage), ['covered', 'on_list', 'not_covered']);
+    assert.deepEqual(result.items.map(i => [i.groups.long_lasting.coverage, i.groups.fresh.coverage]), [['covered', 'covered'], ['on_list', 'not_covered'], ['not_covered', 'not_covered']]);
     await assert.rejects(reader.getCoverage({ from: '2026-12-01', to: '2026-11-01' }), error => error.code === 'invalid_request');
     await assert.rejects(reader.getCoverage({ from: '2026-10-19', to: '2026-10-25' }), error => error.code === 'source_invalid', 'items outside the range');
-    globalThis.fetch = async () => json({ items: [{ ...coverage.items[2], trip_id: 'trip_x' }] });
-    await assert.rejects(reader.getCoverage({ from: '2026-11-01', to: '2026-11-30' }), error => error.code === 'source_invalid');
+    const broken = [
+      item => { item.groups.fresh.trip_id = 'trip_x'; }, // not_covered with a trip (fresh is uncovered on this item)
+      item => { item.groups.long_lasting.coverage = 'covered'; }, // covered without a trip
+      item => { item.groups.long_lasting.changed_since_shopping = true; }, // changed needs covered
+      item => { delete item.groups.fresh; },
+      item => { item.coverage = 'covered'; delete item.groups; }, // old flat shape
+      item => { item.groups.extra = gc(); },
+    ];
+    for (const mutate of broken) {
+      const item = clone(coverage.items[2]); mutate(item);
+      globalThis.fetch = async () => json({ items: [item] });
+      await assert.rejects(reader.getCoverage({ from: '2026-11-01', to: '2026-11-30' }), error => error.code === 'source_invalid');
+    }
   } finally { globalThis.fetch = original; }
 });
 
@@ -130,7 +156,7 @@ test('static reader serves published trips and derives coverage from them', asyn
     assert.deepEqual(await reader.getShoppingTrip('trip_open'), open);
     await assert.rejects(reader.getShoppingTrip('trip_nope'), error => error.code === 'trip_not_found');
     const coverage = await reader.getCoverage({ from: first.week_start, to: second.week_end });
-    assert.deepEqual(coverage.items.map(c => [c.plan_id, c.coverage, c.trip_id, c.changed_since_shopping]), [
+    assert.deepEqual(coverage.items.map(c => [c.plan_id, c.groups.long_lasting.coverage, c.groups.fresh.trip_id, c.groups.fresh.changed_since_shopping]), [
       [first.plan_id, 'on_list', 'trip_open', false],
       [second.plan_id, 'covered', 'trip_done', true],
     ]);
@@ -144,7 +170,7 @@ test('static reader without published trips reports an empty list and not_covere
   try {
     const reader = staticReader();
     assert.deepEqual(await reader.listShoppingTrips(), { items: [] });
-    assert.ok((await reader.getCoverage({ from: first.week_start, to: first.week_end })).items.every(c => c.coverage === 'not_covered' && c.trip_id === null));
+    assert.ok((await reader.getCoverage({ from: first.week_start, to: first.week_end })).items.every(c => Object.values(c.groups).every(g => g.coverage === 'not_covered' && g.trip_id === null)));
   } finally { restore(); }
 });
 
@@ -171,9 +197,20 @@ test('static reader rejects incoherent or unsafe trips', async () => {
     const restore = installBundle({ trips: [trip], manifestTrips: [{ trip_id: 'trip_a', path: 'shopping-trips/trip_a.json' }], overrides: { 'shopping-trips/trip_a.json': trip } });
     try { await assert.rejects(staticReader().listShoppingTrips(), error => error.code === 'source_invalid', label); } finally { restore(); }
   }
-  // A week on two trips violates the one-trip-per-week invariant.
+  // A (week, group) pair on two trips violates the one-trip-per-pair invariant.
   const restore = installBundle({ trips: [tripFor('trip_a', [first]), tripFor('trip_b', [first])] });
   try { await assert.rejects(staticReader().listShoppingTrips(), error => error.code === 'source_invalid'); } finally { restore(); }
+  // The same week split across two trips by group is fine.
+  const split = [tripFor('trip_a', [first]), tripFor('trip_b', [first])];
+  split[0].weeks[0].groups = ['long_lasting']; split[0].items = split[0].items.filter(i => i.shelf_life === 'long_lasting');
+  split[1].weeks[0].groups = ['fresh']; split[1].items = split[1].items.filter(i => i.shelf_life === 'fresh');
+  const restoreSplit = installBundle({ trips: split });
+  try {
+    const reader = staticReader();
+    assert.equal((await reader.listShoppingTrips()).items.length, 2);
+    const [week] = (await reader.getCoverage({ from: first.week_start, to: first.week_end })).items;
+    assert.deepEqual([week.groups.long_lasting.trip_id, week.groups.fresh.trip_id], ['trip_a', 'trip_b']);
+  } finally { restoreSplit(); }
 });
 
 test('static reader enforces trip path safety and duplicate manifest entries', async () => {
@@ -218,7 +255,15 @@ test('static trips stay pinned until refresh and a broken replacement keeps the 
 
 test('deriveCoverage marks unlisted weeks not_covered and keeps changed_since_shopping only on done trips', () => {
   const result = deriveCoverage([first, second], [doneTrip('trip_d', [first], true)], { from: first.week_start, to: second.week_end });
-  assert.deepEqual(result.items.map(c => [c.coverage, c.changed_since_shopping]), [['covered', true], ['not_covered', false]]);
+  assert.deepEqual(result.items.map(c => [c.groups.long_lasting.coverage, c.groups.long_lasting.changed_since_shopping]), [['covered', true], ['not_covered', false]]);
+  assert.deepEqual(result.items.map(c => [c.groups.fresh.coverage, c.groups.fresh.changed_since_shopping]), [['covered', true], ['not_covered', false]]);
+});
+
+test('deriveCoverage reports each group separately', () => {
+  const trip = tripFor('trip_g', [first]);
+  trip.weeks[0].groups = ['fresh'];
+  const [week] = deriveCoverage([first], [trip], { from: first.week_start, to: first.week_end }).items;
+  assert.deepEqual(week.groups, { long_lasting: gc(), fresh: gc('on_list', 'trip_g') });
 });
 
 // ---------- write calls ----------
@@ -257,7 +302,18 @@ test('trip writes send the documented requests with expected_version', async () 
     assert.equal(mock.calls[6].url.searchParams.get('expected_version'), '3');
     await assert.rejects(editor.markTripDone(trip.trip_id, 0), error => error.code === 'invalid_request');
     await assert.rejects(editor.createTrip([]), error => error.code === 'invalid_request');
-    assert.equal(mock.calls.length, 7);
+    await editor.createTrip(['plan_2026_10_19'], '', ['fresh']);
+    assert.deepEqual(mock.calls[7].body, { plan_ids: ['plan_2026_10_19'], groups: ['fresh'] });
+    await editor.addTripWeek(trip.trip_id, 'plan_2026_11_02', 2, ['fresh', 'long_lasting']);
+    assert.deepEqual(mock.calls[8].body, { plan_id: 'plan_2026_11_02', expected_version: 2, groups: ['long_lasting', 'fresh'] });
+    await editor.removeTripWeek(trip.trip_id, 'plan_2026_10_26', 2, 'fresh');
+    assert.equal(mock.calls[9].method, 'DELETE');
+    assert.equal(mock.calls[9].url.searchParams.get('group'), 'fresh');
+    assert.equal(mock.calls[9].url.searchParams.get('expected_version'), '2');
+    assert.equal(mock.calls[3].url.searchParams.has('group'), false, 'no group removes the whole week');
+    assert.equal(mock.calls[0].body.groups, undefined, 'groups stay optional');
+    await assert.rejects(editor.createTrip(['plan_2026_10_19'], '', ['frozen']), /long-lasting, fresh, or both/);
+    assert.equal(mock.calls.length, 10);
   } finally { mock.restore(); }
 });
 
@@ -276,7 +332,7 @@ test('stale_version refetches the trip and explains; other conflicts map to clea
   const conflict = mockFetch(() => json(example('error-week-already-on-trip.json'), 409));
   try {
     const outcome = await runTripAction(() => createPlanEditor().createTrip(['plan_2026_10_26']), { reader: createApiReader() });
-    assert.match(outcome.message, /already on a shopping list/);
+    assert.match(outcome.message, /already on another shopping list/);
     assert.equal(outcome.code, 'week_already_on_trip');
     assert.equal(outcome.trip, undefined);
     assert.equal(conflict.calls.length, 1, 'no refetch for week_already_on_trip');
@@ -337,4 +393,71 @@ test('groupItems keeps section order, moves checked items down and counts them',
 test('sortTrips lists open trips first by soonest week, then done trips newest first', () => {
   const mk = (id, status, start) => ({ trip_id: id, status, weeks: [{ week_start: start }] });
   assert.deepEqual(sortTrips([mk('d1', 'done', '2026-09-01'), mk('o2', 'open', '2026-11-02'), mk('d2', 'done', '2026-10-01'), mk('o1', 'open', '2026-10-19')]).map(t => t.trip_id), ['o1', 'o2', 'd2', 'd1']);
+});
+
+// ---------- long-lasting / fresh model ----------
+test('group labels and week group text', () => {
+  assert.deepEqual(GROUP_LABEL, { long_lasting: 'Long-lasting', fresh: 'Fresh' });
+  assert.equal(weekGroupsLabel(['long_lasting', 'fresh']), 'Long-lasting + Fresh');
+  assert.equal(weekGroupsLabel(['fresh']), 'Fresh only');
+  assert.equal(weekGroupsLabel(['long_lasting']), 'Long-lasting only');
+});
+
+test('groupItemsByShelfLife puts Long-lasting before Fresh with sections inside and skips empty groups', () => {
+  const items = [
+    { ingredient_id: 'milk', unit: 'ml', section: 'dairy', shelf_life: 'fresh' },
+    { ingredient_id: 'rice', unit: 'g', section: 'pantry', shelf_life: 'long_lasting' },
+    { ingredient_id: 'pork', unit: 'g', section: 'protein', shelf_life: 'long_lasting' },
+    { ingredient_id: 'kale', unit: 'g', section: 'produce', shelf_life: 'fresh' },
+  ];
+  const groups = groupItemsByShelfLife(items, { 'rice|g': true });
+  assert.deepEqual(groups.map(g => [g.label, g.checked, g.total]), [['Long-lasting', 1, 2], ['Fresh', 0, 2]]);
+  assert.deepEqual(groups[0].sections.map(x => x.section), ['pantry', 'protein']);
+  assert.deepEqual(groupItemsByShelfLife(items.filter(i => i.shelf_life === 'fresh')).map(g => g.group), ['fresh']);
+  assert.deepEqual(groupItemsByShelfLife([]), []);
+});
+
+test('coverage summary text and selectable weeks', () => {
+  const week = coverageItem('p', '2026-10-19', '2026-10-25', gc('covered', 't1'), gc());
+  assert.equal(coverageSummary(week), 'Long-lasting: covered · Fresh: not covered');
+  assert.equal(coverageSummary(coverageItem('p', 'a', 'b', gc('on_list', 't'), gc('on_list', 't'))), 'Long-lasting: on a list · Fresh: on a list');
+  assert.equal(weekSelectable(week), true);
+  assert.equal(weekSelectable(coverageItem('p', 'a', 'b', gc('covered', 't1'), gc('on_list', 't2'))), false);
+});
+
+test('week availability checks only the chosen groups against other lists', () => {
+  const week = coverageItem('p', 'a', 'b', gc('covered', 't1'), gc());
+  assert.deepEqual(groupsForChoice('both'), ['long_lasting', 'fresh']);
+  assert.deepEqual(groupsForChoice('fresh'), ['fresh']);
+  assert.deepEqual(groupsForChoice('nonsense'), ['long_lasting', 'fresh']);
+  const everything = weekAvailability(week, groupsForChoice('both'));
+  assert.equal(everything.ok, false);
+  assert.deepEqual(everything.blocked, ['long_lasting']);
+  assert.match(everything.reason, /Long-lasting already on another shopping list/);
+  assert.equal(weekAvailability(week, groupsForChoice('fresh')).ok, true);
+  assert.equal(weekAvailability(week, groupsForChoice('long_lasting')).ok, false);
+  // On the target list itself a group is not blocked, but adds nothing.
+  assert.deepEqual(weekAvailability(week, groupsForChoice('both'), 't1'), { blocked: [], useful: ['fresh'], ok: true, reason: '' });
+  assert.equal(weekAvailability(week, groupsForChoice('long_lasting'), 't1').ok, false);
+  assert.equal(weekAvailability(week, groupsForChoice('long_lasting'), 't2').blocked[0], 'long_lasting');
+});
+
+test('request builders', () => {
+  assert.deepEqual(createTripBody(['a'], ' n ', ['fresh', 'long_lasting']), { plan_ids: ['a'], name: 'n', groups: ['long_lasting', 'fresh'] });
+  assert.deepEqual(createTripBody(['a']), { plan_ids: ['a'] });
+  assert.deepEqual(addWeekBody('p', 3, ['fresh']), { plan_id: 'p', expected_version: 3, groups: ['fresh'] });
+  assert.throws(() => addWeekBody('p', 3, []));
+  assert.equal(removeWeekPath('t', 'p', 3), '/shopping-trips/t/weeks/p?expected_version=3');
+  assert.equal(removeWeekPath('t', 'p', 3, 'fresh'), '/shopping-trips/t/weeks/p?expected_version=3&group=fresh');
+});
+
+test('swap impact entries merge per list and order groups', () => {
+  const merged = swapImpactEntries([
+    { trip_id: 'a', name: 'A', status: 'done', groups: ['fresh'], extra_needed: [{ display: 'Kale', quantity: 1, unit: 'units' }] },
+    { trip_id: 'a', name: 'A', status: 'done', groups: ['long_lasting'], extra_needed: [] },
+    { trip_id: 'b', name: 'B', status: 'open', group: 'fresh', extra_needed: [] },
+  ]);
+  assert.deepEqual(merged.map(m => [m.trip_id, m.groups, m.extra_needed.length]), [['a', ['long_lasting', 'fresh'], 1], ['b', ['fresh'], 0]]);
+  assert.deepEqual(swapImpactEntries(null), []);
+  assert.equal(swapImpactEntries({ trip_id: 'x', name: 'X', status: 'open' }).length, 1);
 });

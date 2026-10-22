@@ -551,10 +551,16 @@
       "rule": "consecutive_lunch_same_carb"
     }
   ],
-  "trip": {
-    "extra_needed": [],
-    "name": "Oct 19 - Oct 25",
-    "status": "open",
-    "trip_id": "trip_3f9c1a2b7d4e4c58a1b0e6d5c4b3a291"
-  }
+  "trips": [
+    {
+      "extra_needed": [],
+      "groups": [
+        "long_lasting",
+        "fresh"
+      ],
+      "name": "Oct 19 - Oct 25",
+      "status": "open",
+      "trip_id": "trip_3f9c1a2b7d4e4c58a1b0e6d5c4b3a291"
+    }
+  ]
 }

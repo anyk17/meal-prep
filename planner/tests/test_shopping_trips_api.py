@@ -104,17 +104,18 @@ def test_full_lifecycle_and_coverage(client) -> None:
     trip = ok(client.post(f"{url}/done", json={"expected_version": 3}), 200, "ShoppingTrip")
     assert trip["status"] == "done" and trip["completed_at"]
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-11-15"), 200, "CoverageList")["items"]
-    assert [(i["plan_id"], i["coverage"], i["trip_id"]) for i in cov] == [
-        (P1, "covered", trip["trip_id"]), (P2, "not_covered", None), (P3, "not_covered", None)
-    ]
+    for group in ("long_lasting", "fresh"):
+        assert [(i["plan_id"], i["groups"][group]["coverage"], i["groups"][group]["trip_id"]) for i in cov] == [
+            (P1, "covered", trip["trip_id"]), (P2, "not_covered", None), (P3, "not_covered", None)
+        ]
     trip = ok(client.post(f"{url}/reopen", json={"expected_version": 4}), 200, "ShoppingTrip")
     assert trip["status"] == "open" and trip["version"] == 5
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"]
-    assert [(i["plan_id"], i["coverage"]) for i in cov] == [(P1, "on_list")]
+    assert [(i["plan_id"], i["groups"]["fresh"]["coverage"]) for i in cov] == [(P1, "on_list")]
     assert client.delete(f"{url}?expected_version=5").status_code == 204
     fail(client.get(url), 404, "trip_not_found")
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"]
-    assert cov[0]["coverage"] == "not_covered"
+    assert {g["coverage"] for g in cov[0]["groups"].values()} == {"not_covered"}
     plans = ok(client.get("/api/v1/plans?from=2026-10-26&to=2026-10-26"), 200, "PlanList")
     assert set(plans["items"][0]) == {"plan_id", "week_start", "week_end", "timezone", "revision",
                                        "snapshot_id", "generated_at", "seed"}  # summaries unchanged
@@ -182,7 +183,9 @@ def test_done_freezes_items_when_plan_changes(client) -> None:
     assert after["items"] == done["items"] and after["version"] == done["version"]
     assert after["weeks"][0]["changed_since_shopping"] is True and after["weeks"][0]["current_revision"] == 2
     cov = ok(client.get("/api/v1/coverage?from=2026-10-26&to=2026-10-26"), 200, "CoverageList")["items"][0]
-    assert cov["coverage"] == "covered" and cov["changed_since_shopping"] is True
+    assert {g: (v["coverage"], v["changed_since_shopping"]) for g, v in cov["groups"].items()} == {
+        "long_lasting": ("covered", True), "fresh": ("covered", True)
+    }
 
 
 def test_mutations_need_login(db_path, client) -> None:
@@ -209,6 +212,77 @@ def test_json_mode_is_read_only() -> None:
     fail(client.post(f"{BASE}/trip_x/done", json={"expected_version": 1}), 403, "read_only")
     fail(client.delete(f"{BASE}/trip_x?expected_version=1"), 403, "read_only")
     cov = ok(client.get("/api/v1/coverage?from=2026-10-19&to=2026-10-19"), 200, "CoverageList")
-    assert [(i["plan_id"], i["coverage"], i["trip_id"]) for i in cov["items"]] == [
-        ("plan_2026_10_19", "not_covered", None)
+    assert [
+        (i["plan_id"], g["coverage"], g["trip_id"]) for i in cov["items"] for g in i["groups"].values()
+    ] == [("plan_2026_10_19", "not_covered", None)] * 2
+
+
+# ---------------------------------------------------------------- shelf-life groups (phase 5b)
+
+
+def coverage_of(client, plan_id: str, week_start: str) -> dict:
+    items = ok(client.get(f"/api/v1/coverage?from={week_start}&to={week_start}"), 200, "CoverageList")["items"]
+    return next(i for i in items if i["plan_id"] == plan_id)["groups"]
+
+
+def test_create_with_groups_items_and_coverage(client) -> None:
+    trip = make_trip(client, [P1], groups=["long_lasting"])
+    assert [w["groups"] for w in trip["weeks"]] == [["long_lasting"]]
+    assert trip["items"] and {i["shelf_life"] for i in trip["items"]} == {"long_lasting"}
+    groups = coverage_of(client, P1, "2026-10-26")
+    assert groups["long_lasting"] == {"coverage": "on_list", "trip_id": trip["trip_id"], "changed_since_shopping": False}
+    assert groups["fresh"] == {"coverage": "not_covered", "trip_id": None, "changed_since_shopping": False}
+    # default is both groups on a new week
+    both = make_trip(client, [P2])
+    assert [w["groups"] for w in both["weeks"]] == [["long_lasting", "fresh"]]
+    assert {i["shelf_life"] for i in both["items"]} == {"long_lasting", "fresh"}
+
+
+def test_long_lasting_covers_week_two_while_fresh_does_not(client) -> None:
+    trip = make_trip(client, [P1])
+    url = f"{BASE}/{trip['trip_id']}"
+    trip = ok(client.post(f"{url}/weeks", json={"plan_id": P2, "groups": ["long_lasting"], "expected_version": 1}),
+              200, "ShoppingTrip")
+    assert [(w["plan_id"], w["groups"]) for w in trip["weeks"]] == [
+        (P1, ["long_lasting", "fresh"]), (P2, ["long_lasting"])
     ]
+    week2 = coverage_of(client, P2, "2026-11-02")
+    assert week2["long_lasting"]["coverage"] == "on_list" and week2["fresh"]["coverage"] == "not_covered"
+    # the second list covers fresh for week two; the first week still belongs to the first list
+    second = make_trip(client, [P2], groups=["fresh"])
+    week2 = coverage_of(client, P2, "2026-11-02")
+    assert (week2["long_lasting"]["trip_id"], week2["fresh"]["trip_id"]) == (trip["trip_id"], second["trip_id"])
+    # extending a week already on the list with a group held elsewhere conflicts and names the group
+    err = fail(client.post(f"{url}/weeks", json={"plan_id": P2, "groups": ["fresh"], "expected_version": 2}),
+               409, "week_already_on_trip")
+    assert {"field": "group", "message": "fresh"} in err["details"]
+
+
+def test_add_week_groups_extend_and_validate(client) -> None:
+    trip = make_trip(client, [P1], groups=["fresh"])
+    url = f"{BASE}/{trip['trip_id']}"
+    extended = ok(client.post(f"{url}/weeks", json={"plan_id": P1, "groups": ["long_lasting"], "expected_version": 1}),
+                  200, "ShoppingTrip")
+    assert extended["weeks"][0]["groups"] == ["long_lasting", "fresh"]
+    for bad in ([], ["frozen"], ["fresh", "fresh"], "fresh"):
+        fail(client.post(f"{url}/weeks", json={"plan_id": P2, "groups": bad, "expected_version": 2}),
+             400, "invalid_request")
+        fail(client.post(BASE, json={"plan_ids": [P2], "groups": bad}), 400, "invalid_request")
+
+
+def test_delete_week_with_group_query(client) -> None:
+    trip = make_trip(client, [P1, P2])
+    url = f"{BASE}/{trip['trip_id']}"
+    trip = ok(client.delete(f"{url}/weeks/{P1}?expected_version=1&group=fresh"), 200, "ShoppingTrip")
+    assert [(w["plan_id"], w["groups"]) for w in trip["weeks"]] == [
+        (P1, ["long_lasting"]), (P2, ["long_lasting", "fresh"])
+    ]
+    assert coverage_of(client, P1, "2026-10-26")["fresh"]["coverage"] == "not_covered"
+    fail(client.delete(f"{url}/weeks/{P1}?expected_version=2&group=fresh"), 404, "week_not_on_trip")
+    fail(client.delete(f"{url}/weeks/{P1}?expected_version=2&group=frozen"), 400, "invalid_request")
+    trip = ok(client.delete(f"{url}/weeks/{P1}?expected_version=2&group=long_lasting"), 200, "ShoppingTrip")
+    assert [w["plan_id"] for w in trip["weeks"]] == [P2]  # entry disappears with its last group
+    fail(client.delete(f"{url}/weeks/{P2}?expected_version=3"), 409, "last_week")
+    trip = ok(client.delete(f"{url}/weeks/{P2}?expected_version=3&group=fresh"), 200, "ShoppingTrip")
+    fail(client.delete(f"{url}/weeks/{P2}?expected_version=4&group=long_lasting"), 409, "last_week")
+    assert trip["weeks"][0]["groups"] == ["long_lasting"]

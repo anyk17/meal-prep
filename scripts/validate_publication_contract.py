@@ -205,7 +205,9 @@ def validate_trips(
         return
     trip_ids = [e.get("trip_id") for e in entries if isinstance(e, dict) and isinstance(e.get("trip_id"), str)]
     checks.require(trip_ids == sorted(set(trip_ids)), "manifest shopping_trips must be sorted by trip_id and unique")
-    plan_owner: dict[str, str] = {}
+    plan_owner: dict[tuple[str, str], str] = {}  # (plan_id, group) -> trip_id
+    labels: dict[str, str] = {}  # ingredient_id -> shelf_life as the bundle's trip items show it
+    item_checks: list[tuple[str, dict[str, Any]]] = []
     for position, entry in enumerate(entries):
         label = f"shopping_trips[{position}]"
         if not isinstance(entry, dict):
@@ -241,10 +243,25 @@ def validate_trips(
         )
         week_ids = [w["plan_id"] for w in weeks]
         checks.require(len(set(week_ids)) == len(week_ids), f"{file_label}: week plan_ids must be unique")
+        for item in trip["items"]:
+            known = labels.setdefault(item["ingredient_id"], item["shelf_life"])
+            checks.require(
+                known == item["shelf_life"],
+                f"{file_label}: ingredient {item['ingredient_id']} has conflicting shelf_life values",
+            )
         for week in weeks:
             plan_id = week["plan_id"]
-            other = plan_owner.setdefault(plan_id, trip["trip_id"])
-            checks.require(other == trip["trip_id"], f"{file_label}: plan {plan_id} is already on trip {other}")
+            groups = week["groups"]
+            checks.require(
+                groups == [g for g in trip_domain.GROUPS if g in groups] and len(set(groups)) == len(groups),
+                f"{file_label}: week {plan_id} groups must be unique and ordered long_lasting, fresh",
+            )
+            for group in groups:
+                other = plan_owner.setdefault((plan_id, group), trip["trip_id"])
+                checks.require(
+                    other == trip["trip_id"],
+                    f"{file_label}: plan {plan_id} ({group}) is already on trip {other}",
+                )
             summary = published_plans.get(plan_id)
             if summary is None:
                 checks.errors.append(f"{file_label}: week {plan_id} has no entry in manifest plans")
@@ -278,8 +295,19 @@ def validate_trips(
             and w["revision"] == shopping_by_plan[w["plan_id"]].get("revision")
             for w in weeks
         ):
-            expected_items = trip_domain.sum_items([(w["plan_id"], shopping_by_plan[w["plan_id"]]) for w in weeks])
-            checks.require(trip["items"] == expected_items, f"{file_label}: items must equal the sum of the weeks' shopping lists")
+            item_checks.append((file_label, trip))
+    # Item sums need every trip's labels, so they run after all trips are read. A row whose
+    # ingredient no trip item labels belongs to a group no list buys and is skipped.
+    for file_label, trip in item_checks:
+        expected_items = trip_domain.sum_items(
+            [(w["plan_id"], shopping_by_plan[w["plan_id"]], w["groups"]) for w in trip["weeks"]],
+            labels,
+            skip_unlabeled=True,
+        )
+        checks.require(
+            trip["items"] == expected_items,
+            f"{file_label}: items must equal the sum of the covered groups' rows of the weeks' shopping lists",
+        )
 
 
 def validate_bundle(

@@ -46,7 +46,7 @@ class SwapEnv:
             proposal_ttl=timedelta(minutes=10),
             trips=self.trip_repo,
         )
-        self.trips = ShoppingTripService(self.trip_repo, self.repo, self.clock)
+        self.trips = ShoppingTripService(self.trip_repo, self.repo, self.clock, INPUTS.shelf_lives)
         self.plan = self._plan_with_pair()
 
     def _plan_with_pair(self):
@@ -310,7 +310,7 @@ def test_preview_stores_nothing(env: SwapEnv) -> None:
     assert first == second
     assert first.base_revision == 1 and len(first.changes) == 2
     assert {c.kind for c in first.changes} == {"changed"}
-    assert first.rule_warnings and first.trip is None
+    assert first.rule_warnings and first.trips == ()
     assert env.current().revision == 1 and len(env.repo.list_revisions(env.plan_id)) == 1
     assert proposal_count(env.repo) == 0
     assert env.repo.get_retry(env.plan_id, "k1") is None
@@ -320,12 +320,15 @@ def test_preview_trip_impact_open_done_and_none(env: SwapEnv) -> None:
     slot = env.linked_lunch()
     variant = env.variant_for(slot, protein_differs=True)
     args = (env.plan_id, slot["assignment_id"], variant, "pair", 1)
-    assert env.svc.preview_swap(*args).trip is None
+    assert env.svc.preview_swap(*args).trips == ()
     trip = env.trips.create([env.plan_id], "Weekly")
-    impact = env.svc.preview_swap(*args).trip
-    assert impact == {"trip_id": trip["trip_id"], "name": "Weekly", "status": "open", "extra_needed": []}
+    (impact,) = env.svc.preview_swap(*args).trips
+    assert impact == {
+        "trip_id": trip["trip_id"], "name": "Weekly", "status": "open",
+        "groups": ["long_lasting", "fresh"], "extra_needed": [],
+    }
     env.trips.mark_done(trip["trip_id"], trip["version"])
-    done = env.svc.preview_swap(*args).trip
+    (done,) = env.svc.preview_swap(*args).trips
     assert done["status"] == "done" and done["trip_id"] == trip["trip_id"]
     base = totals(env.current().snapshot.shopping_list)
     env.swap(slot, variant, "pair")
