@@ -77,7 +77,7 @@ class GenerationServicesTest(unittest.TestCase):
                 "variantId": "pollo_toscano_lunch__carb_yuca",
                 "protein": "chicken",
                 "carb": "yuca",
-                "proteinQty": 260.0,
+                "proteinQty": 175.0,
                 "carbQty": 70.0,
                 "extendedFromLunch": False,
             },
@@ -88,7 +88,7 @@ class GenerationServicesTest(unittest.TestCase):
                 for item in slot["ingredients"]
             ],
             [
-                ("chicken", 260.0, "g", "protein"),
+                ("chicken", 175.0, "g", "protein"),
                 ("cherry_tomato", 100.0, "g", "veg"),
                 ("spinach", 80.0, "g", "veg"),
                 ("onion", 50.0, "g", "veg"),
@@ -113,7 +113,7 @@ class GenerationServicesTest(unittest.TestCase):
         self.assertEqual(
             rows,
             {
-                "chicken": ("Pollo", 260.0, "g", "protein", None),
+                "chicken": ("Pollo", 175.0, "g", "protein", None),
                 "cherry_tomato": ("Tomate cherry", 100.0, "g", "vegetable", None),
                 "spinach": ("Espinaca", 80.0, "g", "vegetable", None),
                 "olives": ("Aceitunas", 30.0, "g", "condiment", None),

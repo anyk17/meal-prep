@@ -15,13 +15,13 @@ meal_rules:
 # All weights are RAW (uncooked)
 protein_portions_g:
   chicken:
-    lunch: 260
+    lunch: 175
     dinner: 100  # Reduced for dinner (assumes pre-workout protein)
   beef:
-    lunch: 280
+    lunch: 185
     dinner: 100
   pork:
-    lunch: 280
+    lunch: 230
     dinner: 100
   fish:
     lunch: 280
@@ -29,6 +29,15 @@ protein_portions_g:
   egg:
     lunch: 3   # Assuming if egg is used in lunch/dinner, it follows units
     dinner: 3
+
+# Ingredient-specific lunch portions; other meals use the protein-type defaults.
+protein_portion_overrides_g:
+  fish_salmon:
+    lunch: 200
+  fish_tilapia:
+    lunch: 200
+  fish_tuna_fillet:
+    lunch: 170
 
 # Planning constraints
 constraints:

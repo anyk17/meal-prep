@@ -237,7 +237,16 @@ class Rules(BaseModel):
     week: WeekConfig
     meal_rules: dict[MealType, MealRules]
     protein_portions_g: dict[ProteinType, ProteinPortions]
+    protein_portion_overrides_g: dict[str, ProteinPortions] = Field(default_factory=dict)
     constraints: Constraints
+
+    def protein_portion(self, protein_type: ProteinType, ingredient_id: str, meal: str) -> float:
+        """Resolve an ingredient override, falling back to the protein-type portion."""
+        override = self.protein_portion_overrides_g.get(ingredient_id)
+        value = getattr(override, meal, None)
+        if value is not None:
+            return value
+        return getattr(self.protein_portions_g[protein_type], meal, 0)
 
 
 

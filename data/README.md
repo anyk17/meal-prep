@@ -100,3 +100,11 @@ This will check:
 - Filename matches recipe `id`
 - Exactly one quantity field per ingredient line
 - Ingredient role uses a supported value
+
+### Ingredient-specific protein portions
+
+`rules.yml` supports `protein_portion_overrides_g`, keyed by ingredient ID, with
+optional `lunch` and `dinner` values. A missing meal override uses the corresponding
+`protein_portions_g` default. These raw quantities apply to generated meals,
+manual swaps, and shopping lists. Salmon and tilapia lunches use 200 g; fresh tuna
+uses 170 g. Canned tuna retains the fish default, and dinner portions stay at 100 g.
