@@ -51,7 +51,7 @@ def generate_shopping_list(
             
             if ing.qty == "@portion":
                 # Resolve protein portion
-                protein_type = base_recipe.tags.primary_protein
+                protein_type = base_recipe.tags.protein_group
                 qty = inputs.rules.protein_portion(protein_type, ing.item, meal_name)
                 
             elif ing.qty_g:

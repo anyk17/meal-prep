@@ -67,7 +67,7 @@ def validate_recipe(
         if recipe.carbs.default not in recipe.carbs.allowed:
             raise ValueError(f"Recipe {recipe_id}: default carb must be in allowed list")
 
-    protein_type = recipe.tags.primary_protein
+    protein_type = recipe.tags.protein_group
     if protein_type not in rules.protein_portions_g:
         raise ValueError(
             f"Recipe {recipe_id}: protein type {protein_type.value} not found in rules"

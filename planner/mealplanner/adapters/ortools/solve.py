@@ -21,7 +21,7 @@ def add_weekly_protein_constraints(model: PlannerModel, rules: Rules) -> None:
             for variant in model.variants:
                 if variant.variant_id in slot_vars:
                     # check if this variant uses this protein
-                    if variant.recipe.tags.primary_protein == protein_type:
+                    if variant.recipe.tags.protein_group == protein_type:
                         relevant_vars.append(slot_vars[variant.variant_id])
                         
         if relevant_vars:
@@ -51,7 +51,7 @@ def add_consecutive_protein_constraints(model: PlannerModel, rules: Rules) -> No
                 
                 # Collect vars for this protein type
                 for variant in model.variants:
-                    if variant.recipe.tags.primary_protein == protein_type:
+                    if variant.recipe.tags.protein_group == protein_type:
                         if variant.variant_id in model.vars[current_slot.id]:
                             current_vars.append(model.vars[current_slot.id][variant.variant_id])
                         if variant.variant_id in model.vars[next_slot.id]:
@@ -79,7 +79,7 @@ def add_fish_dinner_constraints(model: PlannerModel, rules: Rules) -> None:
         
         day_fish_vars = []
         for variant in model.variants:
-            if variant.recipe.tags.primary_protein == ProteinType.FISH:
+            if variant.recipe.tags.protein_group == ProteinType.FISH:
                 if variant.variant_id in model.vars[dinner_slot.id]:
                     day_fish_vars.append(model.vars[dinner_slot.id][variant.variant_id])
         

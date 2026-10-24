@@ -7,7 +7,7 @@ name: "Atún con guisito"
 meal_types: [dinner]
 
 tags:
-  primary_protein: fish
+  primary_protein: fish_tuna_canned
 
 # No carbs for dinner
 carbs:

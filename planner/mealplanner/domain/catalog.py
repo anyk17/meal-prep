@@ -144,7 +144,18 @@ class RecipeIngredient(BaseModel):
 class RecipeTags(BaseModel):
     """Recipe tags."""
 
-    primary_protein: ProteinType
+    primary_protein: ProteinType | Literal[
+        "fish_salmon", "fish_tilapia", "fish_tuna_fillet", "fish_tuna_canned"
+    ]
+
+    @property
+    def protein_group(self) -> ProteinType:
+        """Keep species-specific recipe labels within the weekly fish category."""
+        if self.primary_protein in {
+            "fish_salmon", "fish_tilapia", "fish_tuna_fillet", "fish_tuna_canned"
+        }:
+            return ProteinType.FISH
+        return ProteinType(self.primary_protein)
 
 
 class RecipeCarbs(BaseModel):
@@ -185,6 +196,16 @@ class Recipe(BaseModel):
     ingredients: list[RecipeIngredient]
     notes: Optional[str] = None
     extend_to_dinner: bool = False
+
+    @model_validator(mode="after")
+    def validate_protein_label(self) -> "Recipe":
+        """A species label must describe the ingredient receiving the portion."""
+        label = self.tags.primary_protein
+        if label in {"fish_salmon", "fish_tilapia", "fish_tuna_fillet", "fish_tuna_canned"}:
+            protein = next(ing for ing in self.ingredients if ing.qty == "@portion")
+            if protein.item != label:
+                raise ValueError("primary_protein label must match the @portion ingredient")
+        return self
 
     @field_validator("ingredients")
     @classmethod

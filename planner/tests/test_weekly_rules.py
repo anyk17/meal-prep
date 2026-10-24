@@ -127,7 +127,7 @@ def place(plan: dict, day: str, meal: str, variant_id: str) -> None:
     variant = RuleContext.from_inputs(INPUTS).variants[variant_id]
     s = slot(plan, day, meal)
     s["recipe_id"], s["variant_id"] = variant.base_recipe_id, variant_id
-    s["protein"] = variant.recipe.tags.primary_protein.value
+    s["protein"] = variant.recipe.tags.protein_group.value
     s["carb"] = variant.carb_ingredient_id
     if meal == "dinner":
         lunch = slot(plan, day, "lunch")

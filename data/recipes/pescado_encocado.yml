@@ -6,7 +6,7 @@ name: "Pescado encocado"
 meal_types: [lunch]
 
 tags:
-  primary_protein: fish
+  primary_protein: fish_tilapia
 
 # Variable carb strategy
 carbs:

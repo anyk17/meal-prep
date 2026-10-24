@@ -6,7 +6,7 @@ name: "Atún a la JuanFe"
 meal_types: [lunch, dinner]
 
 tags:
-  primary_protein: fish
+  primary_protein: fish_tuna_fillet
 
 # Variable carb strategy for lunch
 carbs:

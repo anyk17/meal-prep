@@ -44,3 +44,30 @@ def test_materialized_and_shopping_portions(item, protein, lunch, meal):
 def test_legacy_rules_without_overrides_keep_type_defaults():
     rules = YamlPlannerInputReader(DATA).read().rules.model_copy(update={"protein_portion_overrides_g": {}})
     assert rules.protein_portion(ProteinType.FISH, "fish_salmon", "lunch") == 280
+
+
+@pytest.mark.parametrize("recipe_id,label,lunch", [
+    ("salmon_horneado", "fish_salmon", 200),
+    ("pescado_encocado", "fish_tilapia", 200),
+    ("atun_juanfe", "fish_tuna_fillet", 170),
+    ("pasta_tefy", "fish_tuna_canned", 280),
+    ("atun_guisito_dinner", "fish_tuna_canned", 280),
+])
+def test_fish_recipe_labels_and_portions(recipe_id, label, lunch):
+    inputs = YamlPlannerInputReader(DATA).read()
+    recipe = inputs.recipes[recipe_id]
+    assert recipe.tags.primary_protein == label
+    assert recipe.tags.protein_group == ProteinType.FISH
+    variant = RecipeVariant(base_recipe_id=recipe.id, variant_id="label_check",
+                            recipe=recipe, carb_ingredient_id=None)
+    for meal, expected in [("lunch", lunch), ("dinner", 100)]:
+        content = materialize_variant(variant, meal, inputs.rules, inputs.ingredients)
+        assert content.protein == "fish"
+        assert content.protein_qty == expected
+
+
+def test_fish_label_rejects_mismatched_portion_ingredient():
+    recipe = YamlPlannerInputReader(DATA).read().recipes["salmon_horneado"].model_dump()
+    recipe["tags"]["primary_protein"] = "fish_tilapia"
+    with pytest.raises(ValueError, match="label must match"):
+        Recipe.model_validate(recipe)

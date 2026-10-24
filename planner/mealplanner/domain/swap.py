@@ -97,7 +97,7 @@ def list_swap_variants(inputs: PlannerInputs) -> list[SwapVariant]:
             v.base_recipe_id,
             v.variant_id,
             v.recipe.name,
-            v.recipe.tags.primary_protein.value,
+            v.recipe.tags.protein_group.value,
             v.carb_ingredient_id,
         )
         for v in catalog_variants(inputs).values()

@@ -8,7 +8,7 @@ meal_types: [lunch, dinner]
 extend_to_dinner: true
 
 tags:
-  primary_protein: fish
+  primary_protein: fish_tuna_canned
 
 # Fixed carb - pasta
 carbs:

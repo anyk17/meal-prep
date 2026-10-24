@@ -231,8 +231,8 @@ class VariantConsistent:
             problems = []
             if variant.base_recipe_id != a.recipe_id:
                 problems.append(f"recipe {a.recipe_id!r} != {variant.base_recipe_id!r}")
-            if variant.recipe.tags.primary_protein.value != a.protein:
-                problems.append(f"protein {a.protein!r} != {variant.recipe.tags.primary_protein.value!r}")
+            if variant.recipe.tags.protein_group.value != a.protein:
+                problems.append(f"protein {a.protein!r} != {variant.recipe.tags.protein_group.value!r}")
             if variant.carb_ingredient_id != a.carb:
                 problems.append(f"carb {a.carb!r} != {variant.carb_ingredient_id!r}")
             if problems:

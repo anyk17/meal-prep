@@ -7,7 +7,7 @@ name: "Salmón horneado"
 meal_types: [lunch, dinner]
 
 tags:
-  primary_protein: fish
+  primary_protein: fish_salmon
 
 # Variable carb strategy for lunch
 carbs:

@@ -79,7 +79,7 @@ def build_plan_output(
         content = materialize_variant(
             variant, meal, inputs.rules, inputs.ingredients
         )
-        pt = variant.recipe.tags.primary_protein
+        pt = variant.recipe.tags.protein_group
         protein_counts[pt.value] += 1
         carb = content.carb or "none"
         if content.carb:
