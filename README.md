@@ -13,30 +13,73 @@ Code layout and layer rules: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 -   **Dark Mode**: Sleek Slate-900 based dark theme with persistent user preference.
 -   **Flexible**: Supports fixed vs. optional carbs and custom dietary rules.
 
-## Prerequisites
+## Development setup (new PC)
 
--   **Python 3.10+** (for the planner)
--   **Linux Node.js 22.12+** (for the UI; `.nvmrc` selects Node 22)
+Everything needed to continue on another machine exactly as today. More detail: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-## Installation
+### 1. Windows + WSL
+In an Admin PowerShell: `wsl --install -d Ubuntu-24.04`, then open Ubuntu. Work inside the Linux filesystem (`~/dev`), never `/mnt/c`.
 
-### 1. Setup the Planner (Python)
-```bash
-# Create a virtual environment
-python3 -m venv .venv
-
-# Activate the virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -e 'planner[api,dev]'
+### 2. System packages, Docker, GitHub CLI
+```sh
+sudo apt-get update
+sudo apt-get install -y git curl python3-venv docker.io docker-compose-v2 gh
+sudo usermod -aG docker "$USER"     # then close and reopen WSL (or prefix docker commands with: sg docker -c "...")
+gh auth login                       # HTTPS, browser login
+git config --global user.name "Juan Felipe"
 ```
 
-### 2. Setup the UI (React)
-```bash
-cd site
-npm ci
-cd ..
+### 3. Code, Node and dependencies
+```sh
+mkdir -p ~/dev && cd ~/dev
+gh repo clone jflopezo91/meal-prep && cd meal-prep
+git checkout feature/cloud-migration
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash   # reopen the terminal
+nvm install && nvm use              # Node 22 from .nvmrc
+bash scripts/setup-local.sh         # .venv + npm ci; --check only verifies
+```
+
+### 4. Data and the publish key (not in git)
+Both live in `var/` (git-ignored). Copy them from the old machine or from a backup:
+
+- **Database:** on the old PC, run `docker compose -f deploy/docker-compose.dev.yml exec meal-prep python -m mealplanner.entrypoints.db_cli backup --db /data/mealplanner.db --dest /data/move.db`. Then copy `var/docker-data/move.db` to the new PC as `var/docker-data/mealplanner.db`, before the first start.
+- **Deploy key:** put it at `var/secrets/deploy_key` and run `chmod 600`. Alternatively, generate a fresh key with `ssh-keygen -t ed25519 -N '' -f var/secrets/deploy_key`, add its `.pub` to [meal-plan deploy keys](https://github.com/jflopezo91/meal-plan/settings/keys) with write access, and delete the old one there. Without a key, everything works except Publish.
+
+### 5. Run it
+```sh
+mkdir -p var/docker-data
+scripts/dev-up.sh                   # builds + starts http://127.0.0.1:8080/ (refuses an unpushed commit)
+docker compose -f deploy/docker-compose.dev.yml exec meal-prep python -m mealplanner.entrypoints.db_cli user add juan   # only for a fresh database
+```
+Run `scripts/dev-up.sh` again after every pull or commit. Skip it and Publish uses the wrong revision, or answers 503.
+
+### 6. Phone on the home Wi-Fi
+WSL is behind Windows, so Windows forwards its Wi-Fi address to the app. Find that address with `ipconfig.exe | grep -A4 Wi-Fi` (it was `192.168.0.10`; reserve it in the router). Run once in an **Admin** PowerShell:
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=<wifi-ip> listenport=8080 connectaddress=127.0.0.1 connectport=8080
+New-NetFirewallRule -DisplayName "meal-prep 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Profile Private -Action Allow
+```
+Then open `http://<wifi-ip>:8080/` on the phone. If it does not load:
+- **Is the forward there?** In a normal PowerShell, `netsh interface portproxy show v4tov4` must list the rule. An empty list means the commands did not run as Administrator.
+- **Is the Wi-Fi Private?** `Get-NetConnectionProfile` must show your Wi-Fi as `Private` (Settings → Network & internet → Wi-Fi → network). The firewall rule only applies on Private networks.
+- **Does Windows reach the app?** `Invoke-WebRequest -UseBasicParsing http://<wifi-ip>:8080/healthz` should return 200. If only `http://127.0.0.1:8080/healthz` works, the forward is missing. If neither works, the container is down: run `scripts/dev-up.sh`.
+- **Is the phone on the same network?** A guest network or mobile data cannot reach the PC.
+- **Can the phone view but not log in?** The dev Compose file sets `MEALPLANNER_COOKIE_SECURE=0`. Keep it while the app is served over plain HTTP.
+
+### 7. Browser checks with Claude Code (Playwright MCP)
+Claude Code drives a headless Chromium in WSL to look at the app and debug it: clicks, screenshots, console errors. The server is declared in [.mcp.json](.mcp.json), so Claude Code offers it the first time you open the repo. Do this once per machine:
+```sh
+npx -y playwright@1.56.1 install-deps chromium   # system libraries (asks for sudo)
+npx -y playwright@1.56.1 install chromium        # the browser itself
+```
+Restart Claude Code and approve the `playwright` server. Then ask it to open `http://127.0.0.1:8080/` and check something.
+
+To test changes, use a **copy** of the data, never the real database. Copy `var/docker-data/mealplanner.db` into a scratch folder, then run a second container from the `meal-prep:dev` image on `127.0.0.1:8081` with that folder as `/data`. Create test users only there, and delete the folder afterwards.
+
+### 8. Checks before pushing
+```sh
+.venv/bin/python -m pytest planner/tests -q
+cd site && npm test && npm run lint
 ```
 
 ## Workflow: How to Generate a Weekly Plan
