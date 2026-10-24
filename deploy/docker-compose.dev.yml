@@ -29,9 +29,11 @@ services:
     environment:
       MEALPLANNER_TIMEZONE: America/Bogota
       MEALPLANNER_PUBLISH_REPO: git@github.com:jflopezo91/meal-plan.git
+      # Plain HTTP on the home Wi-Fi (as planned for the NAS), so phones can log in.
+      MEALPLANNER_COOKIE_SECURE: "0"
     ports:
-      # Household login exists (phase 6c), but its Secure session cookie needs HTTPS beyond localhost:
-      # keep the port on loopback until the LAN HTTPS decision (phase 6d), then open it to the LAN.
+      # Loopback inside WSL; Windows forwards LAN traffic here with a netsh portproxy
+      # (see docs/DEVELOPMENT.md, "Use it from a phone").
       - "127.0.0.1:8080:8080"
     volumes:
       - ../var/docker-data:/data

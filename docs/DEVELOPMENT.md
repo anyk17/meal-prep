@@ -35,6 +35,17 @@ docker compose -f deploy/docker-compose.dev.yml down
   ```
 - **Backup/restore:** `db_cli backup` / `db_cli restore`. Take a backup before a schema change, because `migrate` refuses a database newer than the image supports.
 
+### Use it from a phone (home Wi-Fi)
+
+WSL sits behind Windows, so Windows forwards its Wi-Fi address to the app. Run this once in an Admin PowerShell (`192.168.0.10` is this PC's Wi-Fi address; reserve it in the router):
+
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=192.168.0.10 listenport=8080 connectaddress=127.0.0.1 connectport=8080
+New-NetFirewallRule -DisplayName "meal-prep 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Profile Private -Action Allow
+```
+
+Then open `http://192.168.0.10:8080/` on the phone. The Wi-Fi must be a **Private** network in Windows. The dev Compose file sets `MEALPLANNER_COOKIE_SECURE=0`, because a secure cookie would block login over plain HTTP. To undo: `netsh interface portproxy delete v4tov4 listenaddress=192.168.0.10 listenport=8080` and `Remove-NetFirewallRule -DisplayName "meal-prep 8080"`.
+
 ## Develop the code (Vite + Flask)
 
 ```sh
